@@ -1,0 +1,29 @@
+# Arduino build output
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Host test binaries
+test/out/
+*.o
+*.d
+
+# Arduino IDE
+.vscode/
+.arduinoIDE/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor
+.vim/
+*.swp
+*~
+.DS_Store
+
+# Local scratch
+/tmp_build/
+serial.log
