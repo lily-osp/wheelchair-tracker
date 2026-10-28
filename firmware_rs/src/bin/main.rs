@@ -5,7 +5,10 @@
 //! Issues #1-#6 of the tracker repo are fixed by construction here - see
 //! `lib.rs` for the mapping.
 //!
-//! UNTESTED ON HARDWARE. See `firmware_rs/README.md` for the bench items.
+//! Hardware status (2026-10-29): boot, RTC-state persistence, exact mono
+//! restoration and the sleep/wake loop are verified on a real C3 with no
+//! peripherals attached. The modem/I2C/INT1 paths remain bench-pending - see
+//! `firmware_rs/README.md` and `docs/hardware.md`.
 
 #![no_std]
 #![no_main]
@@ -111,8 +114,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
     let cause = wakeup_cause();
     if cause.contains(WakeupSource::Gpio) {
+        esp_println::println!("wake=GPIO");
         on_motion_wake(state, &mut i2c, &mut imu_int, &params);
     } else if cause.contains(WakeupSource::Timer) {
+        esp_println::println!("wake=Timer mono={}ms", state.mono_ms);
         on_timer_wake(
             state,
             &mut i2c,
@@ -123,6 +128,8 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             uplink_res,
         )
         .await;
+    } else {
+        esp_println::println!("wake=PowerOn state_reset={}", state.mono_ms == 0);
     }
     // Power-on reset (empty cause): the init above already set the first
     // report target.
@@ -179,6 +186,13 @@ async fn on_timer_wake(
 
     let due = state.mono_ms >= state.next_report_ms;
     let watchdog = state.mono_ms.saturating_sub(state.next_report_ms) > cfg::WATCHDOG_MS as u64;
+    esp_println::println!(
+        "timer: mono={}ms next={}ms due={} watchdog={}",
+        state.mono_ms,
+        state.next_report_ms,
+        due,
+        watchdog
+    );
     if due || watchdog {
         let why = if watchdog { "watchdog" } else { "tick" };
         report(state, gate, modem_uart, uplink_res, why).await;
@@ -223,7 +237,9 @@ async fn report(
 ) {
     let mut sim = sim7600::Sim7600::new(modem_uart, Duration::from_millis(1500), 2);
 
-    if !ensure_modem_on(gate, &mut sim).await || !sim.bring_up(None).await {
+    let modem_on = ensure_modem_on(gate, &mut sim).await && sim.bring_up(None).await;
+    esp_println::println!("report({}): modem_on={}", why, modem_on);
+    if !modem_on {
         state.next_report_ms = state.mono_ms + RETRY_AFTER_FAIL_MS;
         state.seal();
         return;
@@ -246,6 +262,7 @@ async fn report(
     }
 
     let sent = send_report(state, &mut sim, uplink_res, why).await;
+    esp_println::println!("report: sent={}", sent);
 
     // Cadence advances on a successful send; failures retry sooner.
     state.next_report_ms = state.mono_ms
@@ -417,6 +434,7 @@ async fn arm_and_sleep(
 ) -> ! {
     state.sleep_target_ms = state.mono_ms + sleep_ms;
     state.seal();
+    esp_println::println!("sleep {}ms", sleep_ms);
     arm_int1_wake(imu_int);
     lp.set_wakeup_deadline(
         esp_hal::time::Instant::now() + esp_hal::time::Duration::from_millis(sleep_ms),

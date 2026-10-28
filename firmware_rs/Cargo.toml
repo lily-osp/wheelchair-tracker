@@ -52,7 +52,7 @@ esp-backtrace = { version = "0.20.0", features = [
   "panic-handler",
   "println",
 ], optional = true }
-esp-println = { version = "0.18.0", features = ["esp32c3"], optional = true }
+esp-println = { version = "0.18.0", default-features = false, features = ["esp32c3", "jtag-serial"], optional = true }
 
 bytemuck = { version = "1.24", features = ["derive"] }
 critical-section = { version = "1.2.0", optional = true }

@@ -3,11 +3,17 @@
 Rust (`no_std`, esp-hal): motion-gated location tracker on ESP32-C3 SuperMini +
 SIM7600CE-T + LIS2DH.
 
-**Status: UNTESTED ON HARDWARE.** All parsing/classification/validation logic is
-host-tested (38 tests, `cargo test` command below); the transport glue (AT
-timings, PPP dial, sleep/wake path) is written against the modem's
-bench-verified behaviour but has never run on the board. Treat a first flash as
-a bench exercise, not a deployment.
+**Status: partially bench-verified on hardware (2026-10-29).** All
+parsing/classification/validation logic is host-tested (38 tests, `cargo test`
+command below). On the real board (ESP32-C3 SuperMini, no peripherals
+attached): flash + boot ✔, esp-hal/esp-rtos init ✔, RTC-fast state surviving
+deep sleep ✔, exact `mono_ms` restoration on timer wake ✔, stable wake →
+classify → report → sleep loop ✔ (no panic), bounded absent-modem probe ✔.
+
+**Still unverified on hardware** (needs the peripherals wired): SIM7600 UART
+transport and AT command timings, PPP dial + HTTP POST, LIS2DH I2C reads, INT1
+GPIO wake, `AT+CPOF` recovery, deep-sleep current draw. Treat the modem and
+sensor paths as bench-pending until `docs/hardware.md`'s checklist runs.
 
 ## Issues #1–#6 fixed by construction
 

@@ -106,10 +106,15 @@ for this module.
 ## Status
 
 All parsing/classification/validation logic is verified by the host test suite
-(38 tests, `cargo test` in `firmware_rs/`). The transport glue (AT timings, PPP
-dial, sleep/wake path) is written against the module's verified behaviour but
-**has not run on hardware yet** — see `firmware_rs/README.md` for the bench
-checklist.
+(38 tests, `cargo test` in `firmware_rs/`). First hardware smoke test passed
+(2026-10-29, ESP32-C3 SuperMini, no peripherals): flash, boot, esp-hal/esp-rtos
+init, RTC-fast state persistence, exact `mono_ms` restoration on timer wake,
+and a stable wake → classify → report → deep-sleep loop — no panics.
+
+**Still bench-pending:** the SIM7600 UART transport, PPP dial + HTTP POST,
+LIS2DH I2C reads, INT1 GPIO wake, `AT+CPOF` recovery, and measured sleep
+current — everything that needs the peripherals wired. `docs/hardware.md`
+carries the bench checklist.
 
 The modem itself was verified over USB (identity, SIM, signal, operator,
 registration, APN, IP, cellular DNS, SMS list/read/send, GNSS on/off,
@@ -118,7 +123,7 @@ capability probe, input rejection) — those findings are encoded in
 
 **The full tracker path has not run with a LIS2DH attached yet.** Run
 [`docs/hardware.md`](docs/hardware.md)'s bench checklist in order before
-trusting anything.
+trusting anything. (Board-only smoke test passed — see above.)
 
 ## Privacy
 
