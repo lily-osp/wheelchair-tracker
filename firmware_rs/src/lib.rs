@@ -1,4 +1,4 @@
-//! Rust port of the `wheelchair_tracker` Arduino sketch.
+//! Wheelchair location tracker firmware.
 //!
 //! ESP32-C3 SuperMini + SIM7600CE-T + LIS2DH, esp-hal based (`no_std`).
 //! Fixes for tracker issues #1-#6 are design requirements here, not patches:

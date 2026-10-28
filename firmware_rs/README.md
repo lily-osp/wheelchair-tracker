@@ -1,20 +1,19 @@
-# firmware_rs — Rust port
+# firmware_rs — the firmware
 
-Pure-Rust (`no_std`) port of the [`wheelchair_tracker/`](../wheelchair_tracker/)
-Arduino sketch: motion-gated location tracker on ESP32-C3 SuperMini +
+Rust (`no_std`, esp-hal): motion-gated location tracker on ESP32-C3 SuperMini +
 SIM7600CE-T + LIS2DH.
 
 **Status: UNTESTED ON HARDWARE.** All parsing/classification/validation logic is
 host-tested (38 tests, `cargo test` command below); the transport glue (AT
-timings, PPP dial, sleep/wake path) is written against the verified C++
-prototype's quirks but has never run on the board. Treat a first flash as a
-bench exercise, not a deployment.
+timings, PPP dial, sleep/wake path) is written against the modem's
+bench-verified behaviour but has never run on the board. Treat a first flash as
+a bench exercise, not a deployment.
 
-## Why a second firmware
+## Issues #1–#6 fixed by construction
 
-The open issues #1–#6 of the tracker repo share one root cause: the sketch
-assumes `loop()` runs forever, but every cycle ends in deep sleep. This port
-fixes them by construction instead of patching:
+The tracker repo's open issues #1–#6 share one root cause: the original
+prototype assumed `loop()` runs forever, but every cycle ends in deep sleep.
+This firmware fixes them by construction instead of patching:
 
 | Issue | Fix |
 |---|---|

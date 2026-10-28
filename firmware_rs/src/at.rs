@@ -1,8 +1,8 @@
 //! Pure AT line-protocol core: buffering, line classification, field
 //! extraction and validation. No I/O, no clocks - host-testable.
 //!
-//! Firmware quirks baked in from the verified MicroPython prototype (see
-//! Sim7600At.h in the C++ port and the root README):
+//! Firmware quirks baked in from bench verification against the live modem
+//! (firmware LE20B05SIM7600M22; see hardware.md and firmware_rs/README.md):
 //!   - With echo off, action-form commands return BARE values (AT+CGMM ->
 //!     "SIM7600CE-T"): no "+CGMM:" prefix, leading blank lines. A parser that
 //!     only looks for prefixed lines silently returns nothing.

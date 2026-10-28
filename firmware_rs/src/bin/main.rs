@@ -1,5 +1,5 @@
-//! Rust port of the `wheelchair_tracker` sketch: motion-gated location
-//! tracker on ESP32-C3 + SIM7600CE-T + LIS2DH.
+//! Wheelchair location tracker: motion-gated reporting on ESP32-C3 +
+//! SIM7600CE-T + LIS2DH.
 //!
 //! Every code path ends in deep sleep; the wake cause decides what happens.
 //! Issues #1-#6 of the tracker repo are fixed by construction here - see

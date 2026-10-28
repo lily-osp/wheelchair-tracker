@@ -1,7 +1,7 @@
 # wheelchair-tracker hardware
 
-The pin map applies to both firmwares (`firmware_rs/` and the legacy
-`wheelchair_tracker/`). Verify against the silkscreen on your board — C3
+The pin map applies to `firmware_rs/` (the firmware in this repo). Verify
+against the silkscreen on your board — C3
 SuperMini pinouts differ between sellers. GPIO18/19 are the USB Serial/JTAG pair
 and are unusable if you program over USB, which is the only programming path on
 this board.
@@ -95,9 +95,8 @@ inductor and the Li-ion cell.
 
 ## Bench checklist
 
-Run in this order; each step gates the next. Steps 1–4 below were written
-against the MicroPython prototype (`poc/`); `firmware_rs/` covers the same
-ground via its own code paths (`lis2dh::probe`, `sim7600::position`).
+Run in this order; each step gates the next. `firmware_rs/` covers all of
+these via its own code paths (`lis2dh::probe`, `sim7600::position`).
 
 1. **I2C scan.** The bus must list `0x19` (or `0x18` if SDO/SA0 is low).
    Nothing works until this passes.
@@ -123,7 +122,7 @@ ground via its own code paths (`lis2dh::probe`, `sim7600::position`).
 
 ## Open items
 
-- **Modem VBAT load switch is not installed.** Both firmwares power the module
+- **Modem VBAT load switch is not installed.** The firmware powers the module
   down at the AT/PWRKEY level (`AT+CPOF` with a PWRKEY-pulse fallback in
   `firmware_rs/`), but cutting VBAT entirely needs a load switch plus
   re-registration time — separate piece of work. Until then the module's own

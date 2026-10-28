@@ -1,22 +1,6 @@
-# Arduino build output
-build/
-*.bin
-*.elf
-*.map
-*.hex
-
-# Host test binaries
-test/out/
-*.o
-*.d
-
-# Arduino IDE
-.vscode/
-.arduinoIDE/
-
-# Python
-__pycache__/
-*.pyc
+# Rust / cargo build output lives in firmware_rs/target/ (own .gitignore)
+target/
+debug/
 
 # Editor
 .vim/
