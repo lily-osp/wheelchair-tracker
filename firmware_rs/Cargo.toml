@@ -6,6 +6,11 @@ version      = "0.1.0"
 # src/bin/main.rs needs the HAL; discovery must not pick it up ungated.
 autobins     = false
 
+[[bin]]
+name = "firmware_rs"
+path = "./src/bin/main.rs"
+required-features = ["firmware"]
+
 # Host tests (`cargo test --no-default-features`) build only the pure logic;
 # the firmware feature pulls in the HAL and the async stack.
 [features]
