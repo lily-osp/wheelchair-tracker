@@ -1,10 +1,10 @@
 # wheelchair-tracker hardware
 
-## Pin map
-
-Verify against the silkscreen on your board — C3 SuperMini pinouts differ
-between sellers. GPIO18/19 are the USB Serial/JTAG pair and are unusable if you
-program over USB, which is the only programming path on this board.
+The pin map applies to both firmwares (`firmware_rs/` and the legacy
+`wheelchair_tracker/`). Verify against the silkscreen on your board — C3
+SuperMini pinouts differ between sellers. GPIO18/19 are the USB Serial/JTAG pair
+and are unusable if you program over USB, which is the only programming path on
+this board.
 
 | C3 | To | Note |
 |---|---|---|
@@ -67,8 +67,8 @@ One GNSS fix:
 ```
 
 A full day of deep sleep is about 0.4 J. **One cold fix costs about 35 days of
-sleep.** This single ratio is why `wheelchair_tracker.py` never acquires while
-parked, and why it reports a stale cached fix instead of re-fixing.
+sleep.** This modelled ratio is why the firmware never acquires while parked,
+and why it reports a stale cached fix instead of re-fixing.
 
 Waking every 5 s to sample the accelerometer costs about 1.2 J/day — worth it,
 and small next to a fix.
@@ -95,36 +95,41 @@ inductor and the Li-ion cell.
 
 ## Bench checklist
 
-Run in this order; each step gates the next.
+Run in this order; each step gates the next. Steps 1–4 below were written
+against the MicroPython prototype (`poc/`); `firmware_rs/` covers the same
+ground via its own code paths (`lis2dh::probe`, `sim7600::position`).
 
-1. **I2C scan.** `i2c.scan()` must list `0x19` (or `0x18` if SDO/SA0 is low).
+1. **I2C scan.** The bus must list `0x19` (or `0x18` if SDO/SA0 is low).
    Nothing works until this passes.
 2. **LIS2DH register readback.** Confirm `WHO_AM_I` returns `0x32` and that
    `OUT_X_L` changes when you tilt the device. Static readings mean the driver
    or the address is wrong, not the sensor.
-3. **Motion threshold tuning.** Set `threshold` in `init()`, then shake the
-   device. `0x08` (0.5 g) is a starting point. Vibration from a real floor will
-   false-trigger below roughly `0x04`; verify on the actual chair, not a desk.
-4. **GNSS sentence capture.** Confirm NMEA appears on the modem's UART1 and that
-   `nmea.feed()` yields `fix.valid`. Needs outdoor sky view. Indoors this will
-   not succeed and that is expected.
+3. **Motion threshold tuning.** Shake the device and check the interrupt
+   actually fires and the firmware classifies it. `0x08` (0.5 g) is a starting
+   point. Vibration from a real floor will false-trigger below roughly `0x04`;
+   verify on the actual chair, not a desk.
+4. **GNSS acquisition.** Confirm a fix arrives via `AT+CGNSSINFO` (needs outdoor
+   sky view; indoors this will not succeed and that is expected).
 5. **SMS round trip.** Verify a ping arrives before trusting any of the above
    on battery.
-6. **Current draw.** Measure deep-sleep current with the LED removed. If it is
+6. **PPP dial** (only if you want the HTTP uplink). `ATD*99***1#` → `CONNECT` →
+   IPCP negotiation → HTTP POST. Unproven on this board; see
+   `firmware_rs/README.md`.
+7. **Current draw.** Measure deep-sleep current with the LED removed. If it is
    above ~50 µA something else is awake — check for a floating pin or the modem
    not entering sleep.
-7. **Endurance.** Log a full day parked, then a full day moving, and measure
+8. **Endurance.** Log a full day parked, then a full day moving, and measure
    actual cell drain. Compare against the modelled budget before shipping.
 
 ## Open items
 
-- **Modem hard power switching is not implemented.** At 10 mA idle the modem will
-  dominate the budget. Cutting VBAT requires a load switch plus proper PWRKEY
-  sequencing and re-registration time, so it is a separate piece of work.
-- **Intervals are unvalidated against real costs.** 60 s while moving is a guess
-  based on plausibility, not on Telkomsel's actual tariff. Check the per-SMS
-  price and recalculate before committing.
-- **No fix timeout path.** `acquire()` blocks up to 45 s. If GNSS routinely fails
-  indoors that is a long stall per attempt, and the modem stays awake throughout.
+- **Modem VBAT load switch is not installed.** Both firmwares power the module
+  down at the AT/PWRKEY level (`AT+CPOF` with a PWRKEY-pulse fallback in
+  `firmware_rs/`), but cutting VBAT entirely needs a load switch plus
+  re-registration time — separate piece of work. Until then the module's own
+  power-down is what the budget assumes.
+- **Intervals are unvalidated against real costs.** 60 s while moving is a
+  plausibility guess, not a calculation from Telkomsel's actual tariff. Check
+  the per-SMS price and recalculate before committing.
 - **Motion thresholds are untuned** and depend entirely on how the sensor is
   mounted relative to the frame.

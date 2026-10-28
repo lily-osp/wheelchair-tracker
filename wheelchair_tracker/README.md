@@ -1,5 +1,11 @@
 # wheelchair_tracker — Arduino C++ firmware
 
+> ⚠️ **Superseded.** The shipping firmware is now the Rust port in
+> [`../firmware_rs/`](../firmware_rs/) — same hardware, same report format, and
+> it adds the HTTP-over-PPP uplink this sketch cannot do (no TCP stack in the
+> Arduino build). This directory is kept as a legacy reference; the quirks
+> documentation below still applies to the modem and is worth reading.
+
 Motion-gated location tracker: **ESP32-C3 SuperMini + SIM7600CE-T + LIS2DH**.
 
 The accelerometer does **not** measure position — it decides whether the chair

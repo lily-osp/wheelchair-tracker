@@ -2,19 +2,27 @@
 
 Motion-gated location tracker: ESP32-C3 Super Mini + SIM7600CE-T + LIS2DH.
 
-Target is **Arduino C++**, in `wheelchair_tracker/`. The MicroPython prototype
-under `poc/` was for fast bring-up against real hardware and is not what ships.
+Target is **Rust (`no_std`, esp-hal)**, in `firmware_rs/` — that is the shipping
+firmware. The SIM7600 provides **both** GNSS and internet: the default uplink is
+SMS; an opt-in HTTP channel runs PPP over the modem's AT UART. The ESP32's own
+WiFi/BT radio is unused. The Arduino C++ port in `wheelchair_tracker/` is kept
+as a legacy reference; the MicroPython prototype under `poc/` was for fast
+bring-up against real hardware and is not what ships.
 
-**See `wheelchair_tracker/README.md` for the full firmware documentation** —
-build flags, flashing, pin configuration, power budget, and the modem's firmware
-quirks.
+**See `firmware_rs/README.md` for the full firmware documentation** — build,
+flashing, pin map, power budget, runtime model, and the bench checklist.
 
-The two things that will waste your time if you skip them:
+### Legacy C++ firmware
+
+`wheelchair_tracker/` still builds and carries the same quirks documentation.
+If you flash it instead, the two things that will waste your time:
 
 - Build with `--fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc`. The default compiles
   `ARDUINO_USB_CDC_ON_BOOT=0`, and the app's `Serial` output then goes nowhere
   while the boot ROM log still prints — it looks exactly like a dead board.
 - The sketch folder name must match the `.ino` filename.
+
+Its own README covers this in full.
 
 ## The finding that shapes the whole design
 
@@ -28,15 +36,18 @@ has one job here:
 
 For real dead reckoning you would need a wheel/axle encoder, not an IMU.
 
-## Power budget — the decisive numbers
+## Power budget — the numbers that shape the design
+
+Modelled from the SIM7600's datasheet idle/GNSS figures and the C3's measured
+deep-sleep current:
 
 ```
 GNSS cold start:  35 s × 120 mA × 3.3 V ≈ 13.9 J per fix
 C3 deep sleep:                       ≈ 0.4 J per full day
 ```
 
-**One cold fix costs roughly 35 days of sleep.** Every design decision follows
-from that:
+**One cold fix costs roughly 35 days of sleep** — a modelled ratio, not a
+measured one. Every design decision follows from it:
 
 - Never acquire a GNSS fix while parked. Re-send the cached fix with an age
   marker instead — a parked chair's position has not changed, so a stale
@@ -48,34 +59,29 @@ from that:
   roughly **400× the entire sleep budget**, and it will dominate runtime no
   matter how good the gating is. It also frees GPIO8, the recommended I²C pin.
 
-## GPIO wake works in Arduino — use it
+## GPIO wake: direct, in both firmwares
 
 The prototype woke on a 5 s timer and polled the accelerometer, because
 **GPIO wake from deep sleep is unreliable on the C3 under MicroPython**
 (micropython#16839, #11787).
 
-In Arduino that problem disappears. On the C3, `EXT0`/`EXT1` are unavailable, but
-`esp_deep_sleep_enable_gpio_wakeup()` works on RTC pins GPIO0–GPIO5:
+Both C ports of the firmware removed that workaround:
 
-```cpp
-esp_deep_sleep_enable_gpio_wakeup(BIT(0), ESP_GPIO_WAKEUP_GPIO_HIGH);
-esp_deep_sleep_start();
-```
+- Arduino: `esp_deep_sleep_enable_gpio_wakeup()` works on RTC pins
+  GPIO0–GPIO5 (wake reason `0x05`, `ESP_SLEEP_WAKEUP_GPIO` — not the EXT values
+  ESP32 documentation suggests).
+- Rust (`firmware_rs/`): the HAL's `Input::listen(Event)` +
+  `apply_wakeup_config(&WakeupConfig::default().with_low_power_path(true))`
+  arms the pin for deep-sleep wake, with a pull-down holding the pad at the
+  non-wake level.
 
-Wake reason is reported as `0x05` (`ESP_SLEEP_WAKEUP_GPIO`), not the EXT0/EXT1
-values you may expect from ESP32 documentation — worth a sanity check on first
-bring-up.
-
-So the shipping design is:
+In both cases the shipping design is:
 
 - **LIS2DH INT1 → C3 GPIO0**, waking deep sleep directly.
 - **A long timer as the watchdog**, so the device still reports even if the
   accelerometer dies or its threshold never fires. A tracker that can only wake
   on motion is a tracker that goes silent the day the sensor fails.
 - Idle state = deep sleep with ~0.5–1 µA, instead of polling every 5 s.
-
-This is the clearest argument for the C++ port: it is not just a language
-preference, it removes a workaround and cuts idle current further.
 
 ## Architecture
 
@@ -86,8 +92,8 @@ preference, it removes a workaround and cuts idle current further.
         └──────┬───────┘         └────────────┘
                │ UART
         ┌──────▼───────┐   own 4.0 V / 2 A supply
-        │  SIM7600CE-T │   SMS uplink only (no TCP on this firmware)
-        └──────┬───────┘
+        │  SIM7600CE-T │   GNSS + internet: SMS default,
+        └──────┬───────┘   HTTP over PPP opt-in
                │
         ┌──────▼────────────────────────────────────┐
         │  Li-ion → boost 4.0 V (modem)            │
@@ -99,15 +105,19 @@ preference, it removes a workaround and cuts idle current further.
 
 ```
 wheelchair-tracker/
-├── wheelchair_tracker/   Arduino C++ — what ships
+├── firmware_rs/            Rust, no_std (esp-hal) — what ships
+│   ├── src/bin/main.rs     wake-path state machine
+│   ├── src/*.rs            AT/GNSS/motion/state, host-tested
+│   └── README.md           ← build, flashing, pins, bench checklist
+├── wheelchair_tracker/     Arduino C++ — legacy reference
 │   ├── wheelchair_tracker.ino
-│   ├── Sim7600At.{h,cpp}  AT transport, ported from the verified prototype
-│   ├── lis2dh.{h,cpp}     I²C accelerometer, threshold interrupt
-│   ├── Nmea.{h,cpp}       NMEA parser with checksum validation
-│   └── README.md          ← build, flashing, pins, power, quirks
-├── test/                 host suite (53 assertions) + Arduino shims
-├── poc/                  MicroPython prototype — verified reference
-├── hardware.md           bench checklist
+│   ├── Sim7600At.{h,cpp}   AT transport, ported from the verified prototype
+│   ├── lis2dh.{h,cpp}      I²C accelerometer, threshold interrupt
+│   ├── Nmea.{h,cpp}        NMEA parser with checksum validation
+│   └── README.md           ← build, flashing, pins, power, quirks
+├── test/                   C++ host suite (53 assertions) + Arduino shims
+├── poc/                    MicroPython prototype — verified reference
+├── hardware.md             bench checklist
 └── README.md
 ```
 
@@ -133,20 +143,27 @@ findings, not just the code:
 
 TinyGSM and the community SIM7600 libraries assume a working `AT+CIPSOCK`/
 `AT+CIPSTART`. On this firmware those commands fail, so their network paths are
-dead on arrival here. The AT transport in `firmware/` is ported from the
-prototype specifically because it was verified against this module's actual
-behaviour.
+dead on arrival here. `firmware_rs/` bypasses the AT data layer entirely: its
+internet path is PPP over the AT UART (`ATD*99***1#`) with embassy-net, and the
+AT transport is ported from the prototype specifically because it was verified
+against this module's actual behaviour.
 
 ## Status
 
-Prototype verified by simulation (fake I²C register model, fake IMU) and against
-the live modem over USB: identity, SIM, signal, operator, registration, APN, IP,
-cellular DNS, SMS list/read/send, GNSS on/off, capability probe, input
-rejection.
+**Shipping firmware: `firmware_rs/` (Rust).** All parsing/classification/validation
+logic is verified by a host test suite (38 tests, `cargo test` in `firmware_rs/`).
+The transport glue (AT timings, PPP dial, sleep/wake path) is written against the
+verified prototype's behaviour but **has not run on hardware yet** — see
+`firmware_rs/README.md` for the bench checklist.
 
-**Neither the firmware nor a LIS2DH has run on hardware yet.** The modem was
-offline during development. See `hardware.md` for the bench checklist — run it in
-order before trusting anything.
+The modem itself was verified over USB (identity, SIM, signal, operator,
+registration, APN, IP, cellular DNS, SMS list/read/send, GNSS on/off,
+capability probe, input rejection) — those findings are encoded in both
+firmwares. The legacy C++ port has its own host suite (53 assertions, `test/`)
+and compile-verified status.
+
+**Neither firmware's full tracker path has run with a LIS2DH attached yet.** Run
+`hardware.md`'s bench checklist in order before trusting anything.
 
 ## Privacy
 
