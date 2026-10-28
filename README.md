@@ -125,9 +125,12 @@ The MicroPython prototype is not throwaway. Its command set was verified against
 the live module and the firmware's quirks are recorded there — port those
 findings, not just the code:
 
-- **No AT data channels.** `AT+CIPSOCK`, `AT+CIPSTART`, `AT+CIPSTATUS`,
-  `AT+CIFSR`, all `AT+CHTTP*`, all `AT+CMQ*` return `ERROR`. SMS and
-  `AT+CDNSGIP` work. So no MQTT-over-cellular on this module as it stands.
+- **The probed AT data commands all fail.** `AT+CIPSOCK`, `AT+CIPSTART`,
+  `AT+CIPSTATUS`, `AT+CIFSR`, all `AT+CHTTP*`, all `AT+CMQ*` return `ERROR` on
+  this module — but the probe was not exhaustive: SIM7600 also documents
+  `AT+NETOPEN`/`AT+CIPOPEN` and `AT+CMQTT*` sets that we did not test. What is
+  certain: SMS and `AT+CDNSGIP` work, and the PPP dial (`ATD*99***1#`) is a
+  separate data path — `firmware_rs/` uses that for internet.
 - **GNSS is `AT+CGPS` / `AT+CGPSNMEAPORTCFG`, not `AT+CGNSPWR`.** Every standard
   GNSS form errors on this firmware.
 - **`AT+CGPSNMEAPORTCFG=3` is a trap** — it routes NMEA onto the AT port and
