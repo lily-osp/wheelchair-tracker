@@ -26,3 +26,8 @@ pub mod gpsinfo;
 pub mod lis2dh;
 pub mod motion;
 pub mod state;
+
+#[cfg(feature = "firmware")]
+pub mod sim7600;
+#[cfg(feature = "firmware")]
+pub mod uplink;
