@@ -11,7 +11,7 @@ pin map, power budget, runtime model, and the bench checklist.
 
 The earlier MicroPython and Arduino C++ prototypes were removed; everything
 they proved about this hardware (modem command quirks, wake behaviour, power
-budget) is baked into `firmware_rs/` and the docs below.
+budget) is baked into `firmware_rs/` and [`docs/`](docs/).
 
 ## The finding that shapes the whole design
 
@@ -93,39 +93,15 @@ wheelchair-tracker/
 │   ├── src/bin/main.rs     wake-path state machine
 │   ├── src/*.rs            AT/GNSS/motion/state, host-tested
 │   └── README.md           ← build, flashing, pins, bench checklist
-├── hardware.md             pin map + bench checklist
+├── docs/
+│   ├── hardware.md         pin map + bench checklist
+│   └── modem-quirks.md     SIM7600 command quirks, third-party-lib warnings
 └── README.md
 ```
 
-## Modem quirks that shaped the firmware
-
-Verified against the live module (firmware LE20B05SIM7600M22) over USB; the
-parsers in `firmware_rs/src/at.rs` encode all of these:
-
-- **The probed AT data commands all fail.** `AT+CIPSOCK`, `AT+CIPSTART`,
-  `AT+CIPSTATUS`, `AT+CIFSR`, all `AT+CHTTP*`, all `AT+CMQ*` return `ERROR` on
-  this module — but the probe was not exhaustive: SIM7600 also documents
-  `AT+NETOPEN`/`AT+CIPOPEN` and `AT+CMQTT*` sets that we did not test. What is
-  certain: SMS and `AT+CDNSGIP` work, and the PPP dial (`ATD*99***1#`) is a
-  separate data path — `firmware_rs/` uses that for internet.
-- **GNSS is `AT+CGPS` / `AT+CGPSNMEAPORTCFG`, not `AT+CGNSPWR`.** Every standard
-  GNSS form errors on this firmware.
-- **`AT+CGPSNMEAPORTCFG=3` is a trap** — it routes NMEA onto the AT port and
-  wedges the command channel. Use port 1.
-- **With `ATE0`, action-form commands return bare values** — `AT+CGMM` →
-  `SIM7600CE-T`, no `+CGMM:` prefix, with leading blank lines. A parser that
-  only looks for prefixed lines silently returns nothing for identity.
-- **`+CPIN`/`+CEREG` must not be treated as unsolicited result codes**, or the
-  reply to the query that asked for them gets discarded.
-- **`AT+CIFSR` is broken**; use `AT+CGPADDR`.
-
-## On third-party libraries
-
-TinyGSM and the community SIM7600 libraries assume a working `AT+CIPSOCK`/
-`AT+CIPSTART`. On this module those commands fail, so their network paths are
-dead on arrival here. `firmware_rs/` bypasses the AT data layer entirely: its
-internet path is PPP over the AT UART (`ATD*99***1#`) with embassy-net, and its
-AT transport was written against this module's actual verified behaviour.
+The modem's command quirks are a whole section of this project's history — see
+[`docs/modem-quirks.md`](docs/modem-quirks.md) before writing any AT transport
+for this module.
 
 ## Status
 
@@ -141,7 +117,8 @@ capability probe, input rejection) — those findings are encoded in
 `firmware_rs/src/at.rs` and `sim7600.rs`.
 
 **The full tracker path has not run with a LIS2DH attached yet.** Run
-`hardware.md`'s bench checklist in order before trusting anything.
+[`docs/hardware.md`](docs/hardware.md)'s bench checklist in order before
+trusting anything.
 
 ## Privacy
 

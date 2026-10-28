@@ -79,7 +79,7 @@ or use `esptool.py` with the standard C3 offsets:
 Everything lives in [`src/config.rs`](src/config.rs) — set `OWNER` and
 `SERVER_HOST` before flashing; both are placeholders.
 
-## Pin map (must match `hardware.md`)
+## Pin map (must match [`../docs/hardware.md`](../docs/hardware.md))
 
 | GPIO | Function |
 |---|---|
