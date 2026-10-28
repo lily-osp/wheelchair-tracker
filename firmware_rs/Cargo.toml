@@ -1,0 +1,77 @@
+[package]
+edition      = "2024"
+name         = "firmware_rs"
+rust-version = "1.95"
+version      = "0.1.0"
+# src/bin/main.rs needs the HAL; discovery must not pick it up ungated.
+autobins     = false
+
+[[bin]]
+name = "firmware_rs"
+path = "./src/bin/main.rs"
+required-features = ["firmware"]
+
+# Host tests (`cargo test --no-default-features`) build only the pure logic;
+# the firmware feature pulls in the HAL and the async stack.
+[features]
+default  = ["firmware"]
+firmware = [
+    "dep:esp-hal",
+    "dep:esp-rtos",
+    "dep:esp-bootloader-esp-idf",
+    "dep:embassy-executor",
+    "dep:embassy-time",
+    "dep:embassy-net",
+    "dep:embassy-net-ppp",
+    "dep:esp-println",
+    "dep:esp-backtrace",
+    "dep:critical-section",
+    "dep:static_cell",
+    "dep:embassy-futures",
+    "dep:embedded-io",
+    "dep:embedded-io-async",
+]
+
+[dependencies]
+esp-hal = { version = "~1.2.2", features = ["esp32c3", "unstable"], optional = true }
+
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp32c3"], optional = true }
+
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c3"], optional = true }
+
+embassy-executor = { version = "0.10.0", optional = true }
+embassy-time = { version = "0.5.0", optional = true }
+embassy-net = { version = "0.9", optional = true, default-features = false, features = [
+    "proto-ipv4",
+    "medium-ip",
+    "tcp",
+] }
+embassy-net-ppp = { version = "0.3", optional = true }
+esp-backtrace = { version = "0.20.0", features = [
+  "esp32c3",
+  "panic-handler",
+  "println",
+], optional = true }
+esp-println = { version = "0.18.0", features = ["esp32c3"], optional = true }
+
+bytemuck = { version = "1.24", features = ["derive"] }
+critical-section = { version = "1.2.0", optional = true }
+static_cell = { version = "2.1.1", optional = true }
+heapless = "0.9"
+embedded-hal = "1.0"
+embassy-futures = { version = "0.1", optional = true }
+embedded-io = { version = "0.7", optional = true }
+embedded-io-async = { version = "0.7", optional = true }
+
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1     # LLVM can perform better optimizations using a single thread
+debug         = 2     # prefer slower builds but better debugging experience
+lto           = 'fat'
+opt-level     = 's'
