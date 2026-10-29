@@ -96,6 +96,7 @@ wheelchair-tracker/
 ├── docs/
 │   ├── hardware.md         pin map + bench checklist
 │   └── modem-quirks.md     SIM7600 command quirks, third-party-lib warnings
+├── flake.nix               pinned dev shell + `nix run .#flash`
 └── README.md
 ```
 

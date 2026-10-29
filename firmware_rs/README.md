@@ -54,7 +54,7 @@ Toolchain: stable, target `riscv32imc-unknown-none-elf` (pinned in
 target).
 
 ```sh
-cargo build                      # firmware (default feature: firmware)
+nix develop -c bash -c 'cd firmware_rs && cargo build'   # or: cd firmware_rs && cargo build
 cargo test --no-default-features --target x86_64-unknown-linux-gnu   # host tests
 ```
 
@@ -64,21 +64,27 @@ without `--target` would try to link `std` into `no_std`.
 
 ### Flashing
 
-`espflash` is not installed. Either:
+With Nix (recommended — toolchain and `espflash` pinned by
+[`../flake.nix`](../flake.nix), from the repo root):
 
 ```sh
-cargo install espflash
-espflash flash --port /dev/ttyUSB0 target/riscv32imc-unknown-none-elf/debug/firmware_rs
+nix run .#flash     # builds, flashes /dev/ttyACM0, attaches the monitor
+nix run .#monitor   # monitor only
 ```
 
-or use `esptool.py` with the standard C3 offsets:
+Without Nix, install `espflash` (`cargo install espflash` or `nix run
+nixpkgs#espflash`) and from `firmware_rs/`:
 
+```sh
+cargo build
+espflash flash --chip esp32c3 --monitor target/riscv32imc-unknown-none-elf/debug/firmware_rs
 ```
-0x0    bootloader.bin   (build artifacts: bootloader/…)
-0x8000 partition-table.bin
-0xe000 boot_app0.bin
-0x10000 firmware_rs.bin
-```
+
+The C3 SuperMini programs over its native USB Serial/JTAG (`/dev/ttyACM0`); no
+BOOT button is needed as long as the current app doesn't wedge USB. On Linux
+you must be in the `dialout` group (udev grants `rw` to it).
+
+Verified flash (2026-10-29): ESP32-C3 rev v0.4, 4MB, boot + first-cycle run OK.
 
 ### Configuration
 
