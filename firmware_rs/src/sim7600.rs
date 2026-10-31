@@ -238,12 +238,25 @@ impl<'d> Sim7600<'d> {
         if model.is_empty() {
             return None;
         }
-        Some((str_s(mfg.bare_value().unwrap_or("")), model, str_s(fw.bare_value().unwrap_or(""))))
+        // CGMR is prefixed ("+CGMR: ...") on this firmware; CGMI/CGMM are bare.
+        let fw_str = fw.value("+CGMR", 0);
+        let fw_out = if fw_str.is_empty() {
+            fw.bare_value().unwrap_or("")
+        } else {
+            fw_str.as_str()
+        };
+        Some((str_s(mfg.bare_value().unwrap_or("")), model, str_s(fw_out)))
     }
 
     /// GNSS power with NMEA routed to the modem's own port (1) - never 3,
     /// which wedges the AT channel.
     pub async fn gnss_on(&mut self) -> bool {
+        // Idempotent: on firmware LE20B05SIM7600M22, AT+CGPS=1 returns ERROR
+        // when GNSS is already on, so probe first.
+        let st = self.command("AT+CGPS?", None).await;
+        if st.res.ok && st.value("+CGPS", 0) == "1" {
+            return true;
+        }
         if !self.ok("AT+CGPSNMEAPORTCFG=1").await {
             return false;
         }

@@ -21,6 +21,35 @@ read this first:
   reply to the query that asked for them gets discarded.
 - **`AT+CIFSR` is broken**; use `AT+CGPADDR`.
 
+## Verified over USB (bench, 2026-10-31)
+
+Port mapping on the composite device (`1e0e:9001`, six interfaces):
+
+- `/dev/ttyUSB3` — primary AT + PPP data port. `AT+CGMM` → `SIMCOM_SIM7600CE-T`,
+  APN `cmnet`, registered on Telkomsel. PPP dial `ATD*99***1#` → `CONNECT`,
+  IPCP gives `10.0.68.103` (remote `10.64.64.64`, DNS `192.168.136.30`);
+  `ping -I ppp0 8.8.8.8` and `curl --interface ppp0` both succeed.
+- `/dev/ttyUSB4` — secondary AT port (also answers `AT`).
+- GNSS: `AT+CGPS=1` then poll `AT+CGNSSINFO` returns a live fix, e.g.
+  `2,...,0613.04xx,S,10647.60xx,E,311026,1616xx,...` (≈ 6.13°S 106.48°E).
+- Do **not** use `AT+CGPSNMEAPORTCFG=3` (wedges the AT channel); port 1 is safe.
+- On firmware LE20B05SIM7600M22, `AT+CGNSSINFO` prefixes four status fields before
+  lat/N/S/lon/E/W (`status,sats_used,sats_view,fix_mode,`); parse by locating the
+  hemisphere markers, not by fixed index. `AT+CGPS=1` returns `ERROR` if GNSS is
+  already on (idempotency must probe `AT+CGPS?` first).
+- `AT+CGMR` is prefixed (`+CGMR: LE20B05SIM7600M22`); `AT+CGMI`/`AT+CGMM` are bare.
+
+## Adafruit IO sink (configured 2026-10-31)
+
+- Host `io.adafruit.com:80` (plain HTTP; no TLS in firmware). Key header
+  `X-AIO-Key: <see adafruit.toml>`.
+- Feeds: `location` (value `"lat,lon"`), `time` (value = GNSS unix seconds).
+- Paths: `/api/v2/azzar_4/feeds/location/data`, `/api/v2/azzar_4/feeds/time/data`.
+- Verified end-to-end over PPP: POST returns 200 and data appears in the feed.
+
+Use `ttyUSB3` for any bench AT/PPP work; the CP2102 bridge on `/dev/ttyUSB0`
+is separate and not needed for the modem.
+
 ## On third-party libraries
 
 TinyGSM and the community SIM7600 libraries assume a working `AT+CIPSOCK`/

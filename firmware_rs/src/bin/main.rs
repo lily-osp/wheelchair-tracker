@@ -341,24 +341,45 @@ async fn send_report(
     match cfg::REPORT_VIA {
         ReportVia::Sms => sim.sms_send(cfg::OWNER, body.as_str()).await.is_ok(),
         ReportVia::Http => {
-            let mut json = String::<256>::new();
+            // Adafruit IO: two feeds, location and time (GNSS UTC, seconds).
+            let mut loc_body = String::<128>::new();
             let _ = core::fmt::Write::write_fmt(
-                &mut json,
+                &mut loc_body,
                 format_args!(
-                    "{{\"lat\":{},\"lon\":{},\"moving\":{},\"age_s\":{},\"stale\":{},\"why\":\"{}\"}}",
+                    "{{\"value\":\"{},{}\"}}",
                     deg_str(state.lat_e7),
-                    deg_str(state.lon_e7),
-                    state.moving != 0,
-                    age_s,
-                    stale,
-                    why
+                    deg_str(state.lon_e7)
                 ),
             );
+            let mut time_body = String::<64>::new();
+            let _ = core::fmt::Write::write_fmt(
+                &mut time_body,
+                format_args!("{{\"value\":\"{}\"}}", state.unix_fix),
+            );
+
             // DNS must resolve in AT context; after the dial the AT channel
             // belongs to PPP.
             match uplink::resolve_host(sim, cfg::SERVER_HOST).await {
                 Some(ip) => {
-                    uplink::dial_and_post(sim, ip, "/report", json.as_bytes(), uplink_res)
+                    let mut loc_path = String::<96>::new();
+                    let mut time_path = String::<96>::new();
+                    let _ = core::fmt::Write::write_fmt(
+                        &mut loc_path,
+                        format_args!(
+                            "/api/v2/{}/feeds/{}/data",
+                            cfg::AIO_USER,
+                            cfg::AIO_FEED_LOCATION
+                        ),
+                    );
+                    let _ = core::fmt::Write::write_fmt(
+                        &mut time_path,
+                        format_args!("/api/v2/{}/feeds/{}/data", cfg::AIO_USER, cfg::AIO_FEED_TIME),
+                    );
+                    let requests = [
+                        (loc_path.as_str(), loc_body.as_bytes()),
+                        (time_path.as_str(), time_body.as_bytes()),
+                    ];
+                    uplink::dial_and_post(sim, ip, &requests, uplink_res)
                         .await
                         .is_ok()
                 }

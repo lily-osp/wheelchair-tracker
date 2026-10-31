@@ -1,0 +1,7 @@
+[aio]
+host = "io.adafruit.com"
+port = 80
+key = "YOUR_AIO_KEY"
+user = "YOUR_AIO_USERNAME"
+location_feed = "location"
+time_feed = "time"

@@ -42,34 +42,86 @@ pub fn parse_position_line(line: &str) -> Option<Fix> {
         return None;
     }
 
-    // Every field may be empty (the modem emits brackets even for no data).
-    let mut fields: [String<32>; 6] = Default::default();
+    // Every field may be empty (the modem emits commas even for no data).
+    // Firmware builds disagree on the leading fields (some emit
+    // lat,N/S,lon,E/W,... directly; LE20B05SIM7600M22 prefixes
+    // "status,sats_used,sats_view,fix_mode,"), so locate the hemisphere
+    // markers instead of assuming fixed indices.
+    const N: usize = 24;
+    let mut fields: [String<32>; N] = Default::default();
     let Some(colon) = line.find(':') else {
         return None;
     };
     let body = line[colon + 1..].trim_start();
-    let mut start = 0usize;
-    for slot in fields.iter_mut() {
-        match body[start..].find(',') {
-            Some(rel) => {
-                let end = start + rel;
-                slot.push_str(body[start..end].trim()).ok();
-                start = end + 1;
+    let mut nfields = 0usize;
+    // Split on commas, keeping empty fields. Stop at N.
+    let mut pos = 0usize;
+    while nfields < N {
+        let rest = &body[pos..];
+        if pos >= body.len() && nfields > 0 && !body.ends_with(',') {
+            // no more fields
+            // but if body ended with comma, we already added empty? handle below
+            break;
+        }
+        // find next comma
+        let (field, consumed) = match rest.find(',') {
+            Some(rel) => (&rest[..rel], rel + 1),
+            None => (rest, rest.len()),
+        };
+        fields[nfields].push_str(field.trim()).ok();
+        nfields += 1;
+        if consumed == rest.len() && !rest.contains(',') {
+            // last field, no trailing comma
+            break;
+        }
+        pos += consumed;
+        if pos >= body.len() {
+            // if original ended with comma, add one empty trailing field
+            if body.ends_with(',') && nfields < N {
+                fields[nfields].clear();
+                nfields += 1;
             }
-            None => {
-                slot.push_str(body[start..].trim()).ok();
-                break;
-            }
+            break;
         }
     }
-    let all_empty = fields.iter().all(|f| f.is_empty());
+    if nfields == 0 {
+        return None;
+    }
+    let all_empty = (0..nfields).all(|k| fields[k].is_empty());
     if all_empty {
         return None;
     }
 
-    let lat_e7 = parse_hemisphere(fields[0].as_str(), fields[1].as_str())?;
-    let lon_e7 = parse_hemisphere(fields[2].as_str(), fields[3].as_str())?;
-    let unix_time = parse_unix_time(fields[4].as_str(), fields[5].as_str()).unwrap_or(0);
+    // Find first N/S hemisphere marker.
+    let mut lat_idx: Option<usize> = None;
+    let mut lon_idx: Option<usize> = None;
+    for k in 0..nfields {
+        match fields[k].as_str() {
+            "N" | "S" => {
+                if lat_idx.is_none() {
+                    lat_idx = Some(k);
+                }
+            }
+            "E" | "W" => {
+                if lon_idx.is_none() && lat_idx.is_some() {
+                    lon_idx = Some(k);
+                }
+            }
+            _ => {}
+        }
+    }
+    let li = lat_idx?;
+    let oi = lon_idx?;
+    if li == 0 || oi <= li + 1 {
+        return None;
+    }
+    let lat_e7 = parse_hemisphere(fields[li - 1].as_str(), fields[li].as_str())?;
+    let lon_e7 = parse_hemisphere(fields[oi - 1].as_str(), fields[oi].as_str())?;
+
+    // Date/time follow the E/W marker.
+    let date = if oi + 1 < nfields { fields[oi + 1].as_str() } else { "" };
+    let time = if oi + 2 < nfields { fields[oi + 2].as_str() } else { "" };
+    let unix_time = parse_unix_time(date, time).unwrap_or(0);
 
     Some(Fix {
         lat_e7,
@@ -144,6 +196,17 @@ mod tests {
         let f = parse_position_line(line).unwrap();
         assert!(f.valid());
         assert_eq!(f.sats, 0);
+    }
+
+    #[test]
+    fn parses_cgnssinfo_fix_le20() {
+        // Real capture from SIM7600CE-T firmware LE20B05SIM7600M22.
+        let line = "+CGNSSINFO: 2,04,02,01,0613.042428,S,10647.601116,E,311026,161625.0,23.5,0.0,,1.5,1.2,1.0";
+        let f = parse_position_line(line).unwrap();
+        assert!(f.valid());
+        // ~6.13 S, 106.47 E
+        assert_eq!(f.lat_e7, -62_173_738, "got {}", f.lat_e7);
+        assert_eq!(f.lon_e7, 1_067_933_519, "got {}", f.lon_e7);
     }
 
     #[test]

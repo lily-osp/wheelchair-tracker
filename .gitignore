@@ -1,13 +1,55 @@
-# Rust / cargo build output lives in firmware_rs/target/ (own .gitignore)
+# Build output
 target/
 debug/
+**/target/
+**/debug/
 
-# Editor
+# Rust backup
+**/*.rs.bk
+*.pdb
+
+# Secrets / local config (keep *.example)
+adafruit.toml
+*.secret
+.env
+.env.*
+!.env.example
+
+# Local databases / runtime state
+*.db
+*.db-wal
+*.db-shm
+memory.db*
+hela-runs.db*
+
+# Logs / scratch
+*.log
+serial.log
+/tmp_build/
+/tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+.zed/
+.helix/
 .vim/
 *.swp
 *~
-.DS_Store
+.nvim.lua
+*.iml
 
-# Local scratch
-/tmp_build/
-serial.log
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archives
+*.zip
+*.tar
+*.tar.gz

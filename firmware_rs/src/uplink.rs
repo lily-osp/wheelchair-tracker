@@ -92,8 +92,7 @@ impl UplinkResources {
 pub async fn dial_and_post(
     sim: &mut Sim7600<'_>,
     host_ip: Ipv4Address,
-    path: &str,
-    body: &[u8],
+    requests: &[(&str, &[u8])],
     res: &'static mut UplinkResources,
 ) -> Result<(), UplinkError> {
     sim.dial(Duration::from_secs(20))
@@ -140,7 +139,10 @@ pub async fn dial_and_post(
             Ok(true) => {}
             _ => return Err(UplinkError::Timeout),
         }
-        post_request(&stack, host_ip, config::SERVER_PORT, path, body).await
+        for (path, body) in requests {
+            post_request(&stack, host_ip, config::SERVER_PORT, path, body).await?;
+        }
+        Ok(())
     };
 
     // select3, not join3: the net runner never completes (`-> !`), so a
@@ -194,8 +196,8 @@ async fn post_request(
     let mut req = String::<768>::new();
     let _ = write!(
         req,
-        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        path, config::SERVER_HOST, body.len()
+        "POST {} HTTP/1.1\r\nHost: {}\r\nX-AIO-Key: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        path, config::SERVER_HOST, config::AIO_KEY, body.len()
     );
     socket.write_all(req.as_bytes()).await.map_err(|_| UplinkError::Tcp)?;
     socket.write_all(body).await.map_err(|_| UplinkError::Tcp)?;

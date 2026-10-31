@@ -47,12 +47,21 @@ pub const MOVE_EXIT_MG: i32 = 120;
 /// Consecutive motion samples (or wakes) before a state transition.
 pub const HYSTERESIS_SAMPLES: u8 = 3;
 
-/// Destination for position reports. Placeholder - set before flashing.
+/// Destination for position reports (SMS path). Unused when REPORT_VIA = Http.
 pub const OWNER: &str = "+6281234567890";
-/// Report endpoint host for the HTTP uplink. Placeholder - set before
-/// flashing. Plain HTTP only; TLS is not implemented in this firmware.
-pub const SERVER_HOST: &str = "example.com";
-pub const SERVER_PORT: u16 = 80;
+// Adafruit IO settings come from adafruit.toml via build.rs (aio_config.rs).
+include!(concat!(env!("OUT_DIR"), "/aio_config.rs"));
+
+/// Adafruit IO REST endpoint (plain HTTP; no TLS in this firmware).
+pub const SERVER_HOST: &str = CFG_AIO_HOST;
+pub const SERVER_PORT: u16 = CFG_AIO_PORT;
+/// Adafruit IO key for the X-AIO-Key header.
+pub const AIO_KEY: &str = CFG_AIO_KEY;
+/// Adafruit IO username, used in feed paths.
+pub const AIO_USER: &str = CFG_AIO_USER;
+/// Adafruit IO feed names.
+pub const AIO_FEED_LOCATION: &str = CFG_AIO_FEED_LOCATION;
+pub const AIO_FEED_TIME: &str = CFG_AIO_FEED_TIME;
 
 /// Uplink channel.
 ///
@@ -66,8 +75,8 @@ pub enum ReportVia {
     Http,
 }
 
-/// Default to the verified path; flip once the bench checklist passes.
-pub const REPORT_VIA: ReportVia = ReportVia::Sms;
+/// Adafruit IO is the report sink; HTTP uplink is now the default path.
+pub const REPORT_VIA: ReportVia = ReportVia::Http;
 
 /// How long to wait for network registration before giving up.
 pub const REGISTRATION_TIMEOUT_MS: u32 = 60_000;
