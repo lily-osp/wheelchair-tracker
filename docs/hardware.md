@@ -96,6 +96,16 @@ accuracy. Must be mounted clear of the chair's frame and any body — a metal
 wheel or frame will attenuate badly. Keep it away from the boost converter's
 inductor and the Li-ion cell.
 
+## Module notes (Waveshare SIM7600X HAT)
+
+- UART is 3.3 V/5 V compatible; the ESP32-C3's 3.3 V rail is fine.
+- New-version boards auto-power when PWR is shorted to 3V3; if your board
+  does this, `ensure_modem_on()` probes first and skips the PWRKEY pulse.
+  Otherwise pulse PWRKEY ~1 s via the N-MOSFET gate.
+- Cold-start TTFF is about 1 minute in the open; the firmware's
+  `FIX_DEADLINE_MS` (45 s) may need raising for a truly cold module.
+- GNSS antenna required; place the module label-side down in the open.
+
 ## Bench checklist
 
 Run in this order; each step gates the next. `firmware_rs/` covers all of
