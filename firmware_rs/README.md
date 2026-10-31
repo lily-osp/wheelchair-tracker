@@ -4,7 +4,7 @@ Rust (`no_std`, esp-hal): motion-gated location tracker on ESP32-C3 SuperMini +
 SIM7600CE-T + LIS2DH.
 
 **Status: partially bench-verified on hardware (2026-10-29).** All
-parsing/classification/validation logic is host-tested (38 tests, `cargo test`
+parsing/classification/validation logic is host-tested (39 tests, `cargo test`
 command below). On the real board (ESP32-C3 SuperMini, no peripherals
 attached): flash + boot ✔, esp-hal/esp-rtos init ✔, RTC-fast state surviving
 deep sleep ✔, exact `mono_ms` restoration on timer wake ✔, stable wake →
@@ -34,8 +34,8 @@ This firmware fixes them by construction instead of patching:
 in `gpsinfo.rs` (0 or omitted, never guessed) and the host test suite.
 
 Uplink: **GPS + internet both via the SIM7600**. The ESP32's own WiFi/BT radio
-is unused. Default channel is SMS (verified path); HTTP-over-PPP is opt-in
-(`config::REPORT_VIA`).
+is unused. Default channel is now HTTP-over-PPP to Adafruit IO (verified on
+2026-10-31); flip `config::REPORT_VIA` to `Sms` for the SMS path.
 
 ## Stack
 
@@ -88,8 +88,12 @@ Verified flash (2026-10-29): ESP32-C3 rev v0.4, 4MB, boot + first-cycle run OK.
 
 ### Configuration
 
-Everything lives in [`src/config.rs`](src/config.rs) — set `OWNER` and
-`SERVER_HOST` before flashing; both are placeholders.
+- Board pins, cadences and thresholds live in [`src/config.rs`](src/config.rs).
+- Adafruit IO settings (key, username, host, port, feed names) live in
+  [`adafruit.toml`](adafruit.toml) (copy from `adafruit.toml.example`). The
+  build script turns them into compile-time constants; edit the TOML, not the
+  source. `adafruit.toml` is gitignored — never commit a real key.
+- `OWNER` (SMS path) and `SERVER_HOST`/`AIO_*` are consumed from there.
 
 ## Pin map (must match [`../docs/hardware.md`](../docs/hardware.md))
 
@@ -123,9 +127,9 @@ Modem I2C address: 0x19 (LIS2DH, SDO/SA0 high).
 
 ## Bench checklist (before trusting any of it)
 
-1. **PPP dial**: `ATD*99***1#` → `CONNECT` → IPCP negotiation. Never exercised
-   on this board; the CIP* commands being broken does not imply PPP is, but it
-   is unproven. Serial-monitor `AT+CGDCONT` and APN setup first.
+1. **PPP dial**: `ATD*99***1#` → `CONNECT` → IPCP negotiation. Verified over
+   USB on this module (IP `10.0.68.103`, DNS `192.168.136.30`); HTTP POST to
+   Adafruit IO returns 200. Still needs the ESP32 UART path exercised.
 2. **INT1 wake**: verify the IMU actually wakes the chip (GPIO0 path). If not,
    rewire to GPIO3 and change `IMU_INT1`. The pull-down on the wake pin is
    load-bearing — a floating pad wakes immediately and forever.

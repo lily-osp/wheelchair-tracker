@@ -111,8 +111,9 @@ these via its own code paths (`lis2dh::probe`, `sim7600::position`).
    sky view; indoors this will not succeed and that is expected).
 5. **SMS round trip.** Verify a ping arrives before trusting any of the above
    on battery.
-6. **PPP dial** (only if you want the HTTP uplink). `ATD*99***1#` → `CONNECT` →
-   IPCP negotiation → HTTP POST. Unproven on this board; see
+6. **PPP dial** (HTTP uplink). `ATD*99***1#` → `CONNECT` → IPCP negotiation →
+   HTTP POST. Verified over USB on this module (`10.0.68.103`, Adafruit IO
+   returns 200); still needs the ESP32 UART path exercised. See
    `firmware_rs/README.md`.
 7. **Current draw.** Measure deep-sleep current with the LED removed. If it is
    above ~50 µA something else is awake — check for a floating pin or the modem
