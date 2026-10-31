@@ -1,5 +1,8 @@
 # Modem quirks — SIM7600CE-T, firmware LE20B05SIM7600M22
 
+Module: Waveshare SIM7600X 4G & LTE Cat-1 HAT (uses SIM7600CE).
+Reference: https://www.waveshare.com/wiki/SIM7600X_4G_%26_LTE_Cat-1_HAT
+
 Verified against the live module over USB. The parsers in
 `firmware_rs/src/at.rs` encode all of these — if you write your own transport,
 read this first:

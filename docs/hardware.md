@@ -1,5 +1,8 @@
 # wheelchair-tracker hardware
 
+Modem module: Waveshare SIM7600X 4G & LTE Cat-1 HAT (SIM7600CE).
+Reference: https://www.waveshare.com/wiki/SIM7600X_4G_%26_LTE_Cat-1_HAT
+
 The pin map applies to `firmware_rs/` (the firmware in this repo). Verify
 against the silkscreen on your board — C3
 SuperMini pinouts differ between sellers. GPIO18/19 are the USB Serial/JTAG pair
