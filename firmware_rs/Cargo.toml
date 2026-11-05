@@ -47,6 +47,12 @@ name = "imu_probe"
 path = "./src/bin/imu_probe.rs"
 required-features = ["firmware"]
 
+# Bench-only path: deep-sleep wake from LIS2DH INT1 (GPIO0).
+[[bin]]
+name = "sleep_wake_probe"
+path = "./src/bin/sleep_wake_probe.rs"
+required-features = ["firmware"]
+
 # Host tests (`cargo test --no-default-features`) build only the pure logic;
 # the firmware feature pulls in the HAL and the async stack.
 [features]
