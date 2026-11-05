@@ -15,8 +15,10 @@
 //! - #6: GNSS via `AT+CGNSSINFO`/`AT+CGPSINFO` on the single AT port; no
 //!   second UART, no NMEA parser.
 //!
-//! Uplink: SMS by default (verified path). `Http` runs PPP over the modem's
-//! AT UART (`ATD*99***1#`) with embassy-net - the ESP32 radio is unused.
+//! Uplink: HTTP via the modem's `AT+HTTP` stack by default (verified against
+//! Adafruit IO, 2026-11-05). SMS is the fallback. PPP (`ATD*99***1#`) was
+//! evaluated and is not used (carrier reset the first request). The ESP32's
+//! own radio is unused.
 
 #![cfg_attr(not(test), no_std)]
 

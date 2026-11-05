@@ -18,6 +18,9 @@ pub const IMU_SCL: u8 = 9;
 pub const IMU_INT1: u8 = 0;
 /// 0x19 with SDO/SA0 high (usual breakout), 0x18 pulled low.
 pub const IMU_ADDR: u8 = 0x19;
+/// 250 mg at 16 mg/digit in LIS2DH low-power mode.
+pub const IMU_THRESHOLD: u8 = 16;
+pub const IMU_DURATION: u8 = 2;
 
 /// PWRKEY pulse length.
 pub const MODEM_PWRKEY_HOLD_MS: u32 = 1500;
@@ -47,10 +50,11 @@ pub const MOVE_EXIT_MG: i32 = 120;
 /// Consecutive motion samples (or wakes) before a state transition.
 pub const HYSTERESIS_SAMPLES: u8 = 3;
 
-/// Destination for position reports (SMS path). Unused when REPORT_VIA = Http.
-pub const OWNER: &str = "+6281234567890";
 // Adafruit IO settings come from adafruit.toml via build.rs (aio_config.rs).
 include!(concat!(env!("OUT_DIR"), "/aio_config.rs"));
+pub const OWNER: &str = CFG_OWNER;
+/// Carrier APN for the PDP context; empty means "leave the SIM's default".
+pub const APN: &str = CFG_APN;
 
 /// Adafruit IO REST endpoint (plain HTTP; no TLS in this firmware).
 pub const SERVER_HOST: &str = CFG_AIO_HOST;
@@ -65,25 +69,21 @@ pub const AIO_FEED_TIME: &str = CFG_AIO_FEED_TIME;
 
 /// Uplink channel.
 ///
-/// - `Sms` is the path verified against this module's firmware (see the root
-///   README quirks) - the safe default for a first flash.
-/// - `Http` needs PPP dial-in (`ATD*99***1#`) to work on the real board; run
-///   that against the bench checklist before trusting it.
+/// - `Http` posts through the module's `AT+HTTP` stack; verified on hardware
+///   2026-11-05 against Adafruit IO (HTTP 200). Plain HTTP: the key is sent
+///   in the clear until the TLS path is enabled.
+/// - `Sms` is the fallback and needs `owner` in adafruit.toml.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportVia {
     Sms,
     Http,
 }
 
-/// Adafruit IO is the report sink; HTTP uplink is now the default path.
 pub const REPORT_VIA: ReportVia = ReportVia::Http;
 
 /// How long to wait for network registration before giving up.
 pub const REGISTRATION_TIMEOUT_MS: u32 = 60_000;
 /// Deadline for a GNSS acquisition attempt (cold start ~35 s).
 pub const FIX_DEADLINE_MS: u32 = 45_000;
-/// Deadline for dialing + HTTP POST.
-pub const UPLINK_DEADLINE_MS: u32 = 40_000;
-/// Modem data-mode escape guard time (`+++` needs 1 s of silence on both
-/// sides).
-pub const PPP_ESCAPE_GUARD_MS: u32 = 1100;
+/// Deadline for one HTTP POST, from `AT+HTTPINIT` to `+HTTPACTION`.
+pub const UPLINK_DEADLINE_MS: u32 = 60_000;

@@ -11,24 +11,25 @@
 use embedded_hal::i2c::I2c;
 
 pub const WHO_AM_I: u8 = 0x0F;
-pub const CTRL_REG1: u8 = 0x10;
-pub const CTRL_REG2: u8 = 0x11;
-pub const CTRL_REG4: u8 = 0x1F;
-pub const CTRL_REG5: u8 = 0x20;
-pub const STATUS_REG: u8 = 0x1E;
-pub const INT1_CFG: u8 = 0x09;
-pub const INT1_SRC: u8 = 0x0D;
-pub const INT1_THS: u8 = 0x07;
-pub const INT1_DUR: u8 = 0x08;
+pub const CTRL_REG1: u8 = 0x20;
+pub const CTRL_REG2: u8 = 0x21;
+pub const CTRL_REG3: u8 = 0x22;
+pub const CTRL_REG4: u8 = 0x23;
+pub const CTRL_REG5: u8 = 0x24;
+pub const STATUS_REG: u8 = 0x27;
+pub const INT1_CFG: u8 = 0x30;
+pub const INT1_SRC: u8 = 0x31;
+pub const INT1_THS: u8 = 0x32;
+pub const INT1_DUR: u8 = 0x33;
 pub const OUT_X_L: u8 = 0x28;
 
 /// CTRL_REG1: LPen=1 low-power, BDU=1 block update, XYZ_EN=111, ODR=10 Hz -
 /// the lowest rate that still gates reliably.
-pub const CTRL1_LP_10HZ: u8 = 0x2A;
+pub const CTRL1_LP_10HZ: u8 = 0x2F;
 /// CTRL_REG4: ±2 g so a chair bump is in range without clipping.
-pub const CTRL4_2G: u8 = 0x08;
+pub const CTRL4_2G: u8 = 0x00;
 /// INT1_CFG: latch on any of the three axes.
-pub const INT1_ANY_AXIS: u8 = 0xFD;
+pub const INT1_ANY_AXIS: u8 = 0x2A;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Error<B> {
@@ -83,7 +84,8 @@ impl<B: I2c> Lis2dh<B> {
         self.write_reg(INT1_CFG, INT1_ANY_AXIS)?;
         self.write_reg(INT1_THS, threshold)?;
         self.write_reg(INT1_DUR, duration)?;
-        self.write_reg(CTRL_REG5, 0x00)?; // INT1 routed to the INT1 pad
+        self.write_reg(CTRL_REG3, 0x40)?; // IA1 routed to INT1
+        self.write_reg(CTRL_REG5, 0x08)?; // latch IA1 until INT1_SRC is read
         Ok(())
     }
 
@@ -111,17 +113,11 @@ impl<B: I2c> Lis2dh<B> {
             Operation::Read(&mut b),
         ])?;
 
-        // 12-bit two's complement, left-justified in each 16-bit word; 1
-        // mg/LSB in the ±2 g range. Sign extension must come from bit 11 of
-        // the 12-bit value, not from the 16-bit word: shifting -1000 mg right
-        // by 4 yields 3096, not -1000, because the device emits 0x418 << 4
-        // rather than a sign-extended 16-bit word.
+        // Low-power mode exposes an 8-bit signed sample in OUT*_H at
+        // 16 mg/digit in the ±2 g range.
         let mut out = [0i16; 3];
         for (i, slot) in out.iter_mut().enumerate() {
-            let w = b[i * 2] as u16 | ((b[i * 2 + 1] as u16) << 8);
-            let v = (w >> 4) as u16;
-            let v = if v & 0x0800 != 0 { v | 0xF000 } else { v };
-            *slot = v as i16;
+            *slot = (b[i * 2 + 1] as i8 as i16) * 16;
         }
         Ok(out)
     }
@@ -234,10 +230,7 @@ mod tests {
 
         fn set24(&mut self, reg: u8, v: [i16; 3]) {
             for (i, axis) in v.iter().enumerate() {
-                let w = (*axis as u16 as i32) << 4; // left-justify 12-bit
-                let w = w as u16;
-                self.regs[(reg as usize) + i * 2] = (w & 0xFF) as u8;
-                self.regs[(reg as usize) + i * 2 + 1] = (w >> 8) as u8;
+                self.regs[(reg as usize) + i * 2 + 1] = (*axis / 16) as i8 as u8;
             }
         }
     }
@@ -336,19 +329,18 @@ mod tests {
     }
 
     #[test]
-    fn accel_sign_extends_from_bit11() {
+    fn accel_decodes_low_power_samples() {
         let (mut imu, model) = imu();
-        // -1000 mg in 12-bit: 0xC18. Left-justified into 16 bits: 0xC180.
         model.borrow_mut().set24(OUT_X_L, [-1000, 0, 1000]);
-        assert_eq!(imu.accel(10).unwrap(), [-1000, 0, 1000]);
+        assert_eq!(imu.accel(10).unwrap(), [-992, 0, 992]);
     }
 
     #[test]
     fn magnitude_still_is_about_1000() {
         let (mut imu, model) = imu();
-        model.borrow_mut().set24(OUT_X_L, [3, 4, 998]);
+        model.borrow_mut().set24(OUT_X_L, [0, 0, 992]);
         let mag = imu.magnitude(10);
-        assert_eq!(mag, 998, "floor(sqrt(996029))");
+        assert_eq!(mag, 992);
     }
 
     #[test]
@@ -385,7 +377,7 @@ mod tests {
     #[test]
     fn is_moving_true_when_beyond_threshold() {
         let (mut imu, model) = imu();
-        model.borrow_mut().set24(OUT_X_L, [1300, 0, 0]);
+        model.borrow_mut().set24(OUT_X_L, [1296, 0, 0]);
         assert!(imu.is_moving(250, 3, 100).unwrap());
     }
 

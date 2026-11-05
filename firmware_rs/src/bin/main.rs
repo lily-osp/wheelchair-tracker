@@ -19,7 +19,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Level, Output, OutputConfig, Pull, WakeupConfig};
@@ -36,7 +36,6 @@ use firmware_rs::config::ReportVia;
 use firmware_rs::uplink;
 use firmware_rs::motion::{self, MotionEvent, MotionParams, WakeMotion};
 use firmware_rs::state::PersistState;
-use firmware_rs::uplink::UplinkResources;
 use firmware_rs::{lis2dh, sim7600};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -45,9 +44,6 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// this static is the only thing that survives (issue #1).
 #[esp_hal::ram(unstable(rtc_fast, persistent))]
 static mut PERSIST: PersistState = PersistState::ZEROED;
-
-/// HTTP uplink resources; `'static` because embassy-net demands it.
-static UPLINK_RES: StaticCell<UplinkResources> = StaticCell::new();
 
 /// The modem's UART singleton, parked so `report` can borrow it every wake.
 static MODEM_UART: StaticCell<Uart<'static, esp_hal::Async>> = StaticCell::new();
@@ -61,7 +57,11 @@ const RETRY_AFTER_FAIL_MS: u64 = 60_000;
 
 #[esp_rtos::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
-    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    // 80 MHz is sufficient for the short motion-only path and avoids paying
+    // the 160 MHz active-current cost on every GPIO wake.
+    let peripherals = esp_hal::init(
+        esp_hal::Config::default().with_cpu_clock(CpuClock::default()),
+    );
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
@@ -93,11 +93,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             .into_async(),
     );
 
-    let uplink_res = UPLINK_RES.init(UplinkResources::new());
-
-    // USB CDC needs a moment to enumerate before the first log line.
-    Timer::after_secs(1).await;
-
     let state: &'static mut PersistState = unsafe { &mut *(&raw mut PERSIST) };
     if !state.is_valid() {
         state.reset();
@@ -110,6 +105,14 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         exit_mg: cfg::MOVE_EXIT_MG,
         samples: cfg::HYSTERESIS_SAMPLES,
     };
+    {
+        let mut imu = lis2dh::Lis2dh::new(&mut i2c, cfg::IMU_ADDR);
+        if matches!(imu.probe(), Ok(true)) {
+            let _ = imu.configure(cfg::IMU_THRESHOLD, cfg::IMU_DURATION);
+        } else {
+            esp_println::println!("imu=fault");
+        }
+    }
     arm_int1_wake(&mut imu_int);
 
     let cause = wakeup_cause();
@@ -125,7 +128,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             &params,
             &mut pwrkey_gate,
             modem_uart,
-            uplink_res,
         )
         .await;
     } else {
@@ -172,7 +174,6 @@ async fn on_timer_wake(
     params: &MotionParams,
     gate: &mut Output<'_>,
     modem_uart: &'static mut Uart<'static, esp_hal::Async>,
-    uplink_res: &'static mut UplinkResources,
 ) {
     // Timer wakes are exact: the armed deadline was `sleep_target_ms`.
     state.mono_ms = state.sleep_target_ms.max(state.mono_ms);
@@ -185,17 +186,14 @@ async fn on_timer_wake(
     }
 
     let due = state.mono_ms >= state.next_report_ms;
-    let watchdog = state.mono_ms.saturating_sub(state.next_report_ms) > cfg::WATCHDOG_MS as u64;
     esp_println::println!(
-        "timer: mono={}ms next={}ms due={} watchdog={}",
+        "timer: mono={}ms next={}ms due={}",
         state.mono_ms,
         state.next_report_ms,
-        due,
-        watchdog
+        due
     );
-    if due || watchdog {
-        let why = if watchdog { "watchdog" } else { "tick" };
-        report(state, gate, modem_uart, uplink_res, why).await;
+    if due {
+        report(state, gate, modem_uart, "tick").await;
     }
 }
 
@@ -209,6 +207,12 @@ fn classify_motion(
     let int1_latched = imu_int.is_interrupt_set();
     let mut imu = lis2dh::Lis2dh::new(i2c, cfg::IMU_ADDR);
     let magnitude_mg = imu.magnitude(200);
+    if magnitude_mg < 0 {
+        // A dead/unwired IMU must not be interpreted as PARKED. Treat the
+        // device as active so the timer path continues acquiring fixes.
+        esp_println::println!("imu=read-fault");
+        state.set_moving(true);
+    }
     let polled_moving = magnitude_mg > 0 && (magnitude_mg - 1000).abs() > cfg::MOVE_ENTER_MG;
 
     let event = motion::update(
@@ -232,14 +236,15 @@ async fn report(
     state: &mut PersistState,
     gate: &mut Output<'_>,
     modem_uart: &'static mut Uart<'static, esp_hal::Async>,
-    uplink_res: &'static mut UplinkResources,
     why: &str,
 ) {
+    let awake_started = Instant::now();
     let mut sim = sim7600::Sim7600::new(modem_uart, Duration::from_millis(1500), 2);
 
-    let modem_on = ensure_modem_on(gate, &mut sim).await && sim.bring_up(None).await;
+    let modem_on = ensure_modem_on(gate, &mut sim).await && sim.bring_up(Some(cfg::APN)).await;
     esp_println::println!("report({}): modem_on={}", why, modem_on);
     if !modem_on {
+        advance_awake(state, awake_started);
         state.next_report_ms = state.mono_ms + RETRY_AFTER_FAIL_MS;
         state.seal();
         return;
@@ -255,13 +260,15 @@ async fn report(
     };
 
     if !fix_ok && !state.has_fix() {
+        advance_awake(state, awake_started);
         state.next_report_ms = state.mono_ms + RETRY_AFTER_FAIL_MS;
         state.seal();
         modem_off(&mut sim, gate).await;
         return;
     }
 
-    let sent = send_report(state, &mut sim, uplink_res, why).await;
+    advance_awake(state, awake_started);
+    let sent = send_report(state, &mut sim, why).await;
     esp_println::println!("report: sent={}", sent);
 
     // Cadence advances on a successful send; failures retry sooner.
@@ -285,9 +292,9 @@ async fn acquire_fix(state: &mut PersistState, sim: &mut sim7600::Sim7600<'_>) -
     if !sim.gnss_on().await {
         return false;
     }
-    let deadline = state.mono_ms + cfg::FIX_DEADLINE_MS as u64;
+    let deadline = Instant::now() + Duration::from_millis(cfg::FIX_DEADLINE_MS as u64);
     let mut got = None;
-    while state.mono_ms < deadline {
+    while Instant::now() < deadline {
         if let Some(fix) = sim.position().await {
             if fix.valid() {
                 got = Some(fix);
@@ -311,11 +318,15 @@ async fn acquire_fix(state: &mut PersistState, sim: &mut sim7600::Sim7600<'_>) -
     true
 }
 
+fn advance_awake(state: &mut PersistState, started: Instant) {
+    let elapsed = Instant::now().saturating_duration_since(started).as_millis();
+    state.mono_ms = state.mono_ms.saturating_add(elapsed);
+}
+
 /// Sends via the configured channel (SMS default, HTTP opt-in).
 async fn send_report(
     state: &mut PersistState,
     sim: &mut sim7600::Sim7600<'_>,
-    uplink_res: &'static mut UplinkResources,
     why: &str,
 ) -> bool {
     let age_ms = state.fix_age_ms(state.mono_ms);
@@ -339,51 +350,49 @@ async fn send_report(
     );
 
     match cfg::REPORT_VIA {
-        ReportVia::Sms => sim.sms_send(cfg::OWNER, body.as_str()).await.is_ok(),
+        ReportVia::Sms if !cfg::OWNER.is_empty() => {
+            sim.sms_send(cfg::OWNER, body.as_str()).await.is_ok()
+        }
+        ReportVia::Sms => {
+            esp_println::println!("sms=disabled owner_not_configured");
+            false
+        }
         ReportVia::Http => {
-            // Adafruit IO: two feeds, location and time (GNSS UTC, seconds).
-            let mut loc_body = String::<128>::new();
+            // One atomic point keeps the location, fix age, motion state and
+            // GNSS timestamp together. The server must not infer freshness
+            // from its receive time.
+            let mut loc_body = String::<256>::new();
             let _ = core::fmt::Write::write_fmt(
                 &mut loc_body,
                 format_args!(
-                    "{{\"value\":\"{},{}\"}}",
-                    deg_str(state.lat_e7),
-                    deg_str(state.lon_e7)
+                    "{{\"value\":\"{}\",\"lat\":{},\"lon\":{},\"created_at\":{}}}",
+                    body.as_str(), deg_str(state.lat_e7), deg_str(state.lon_e7), state.unix_fix
                 ),
             );
-            let mut time_body = String::<64>::new();
+
+            // The key goes in the query string because AT+HTTPPARA cannot set
+            // custom headers (see uplink.rs).
+            let mut url = String::<320>::new();
             let _ = core::fmt::Write::write_fmt(
-                &mut time_body,
-                format_args!("{{\"value\":\"{}\"}}", state.unix_fix),
+                &mut url,
+                format_args!(
+                    "http://{}/api/v2/{}/feeds/{}/data?X-AIO-Key={}",
+                    cfg::SERVER_HOST,
+                    cfg::AIO_USER,
+                    cfg::AIO_FEED_LOCATION,
+                    cfg::AIO_KEY
+                ),
             );
 
-            // DNS must resolve in AT context; after the dial the AT channel
-            // belongs to PPP.
-            match uplink::resolve_host(sim, cfg::SERVER_HOST).await {
-                Some(ip) => {
-                    let mut loc_path = String::<96>::new();
-                    let mut time_path = String::<96>::new();
-                    let _ = core::fmt::Write::write_fmt(
-                        &mut loc_path,
-                        format_args!(
-                            "/api/v2/{}/feeds/{}/data",
-                            cfg::AIO_USER,
-                            cfg::AIO_FEED_LOCATION
-                        ),
-                    );
-                    let _ = core::fmt::Write::write_fmt(
-                        &mut time_path,
-                        format_args!("/api/v2/{}/feeds/{}/data", cfg::AIO_USER, cfg::AIO_FEED_TIME),
-                    );
-                    let requests = [
-                        (loc_path.as_str(), loc_body.as_bytes()),
-                        (time_path.as_str(), time_body.as_bytes()),
-                    ];
-                    uplink::dial_and_post(sim, ip, &requests, uplink_res)
-                        .await
-                        .is_ok()
+            match uplink::post_json(sim, url.as_str(), loc_body.as_bytes()).await {
+                Ok(status) => {
+                    esp_println::println!("http={}", status);
+                    true
                 }
-                None => false,
+                Err(e) => {
+                    esp_println::println!("http={:?}", e);
+                    false
+                }
             }
         }
     }

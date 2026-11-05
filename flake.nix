@@ -49,6 +49,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           fw = "firmware_rs/target/riscv32imc-unknown-none-elf/debug/firmware_rs";
+          probe = "firmware_rs/target/riscv32imc-unknown-none-elf/debug/modem_probe";
           cargo = "cargo build --manifest-path firmware_rs/Cargo.toml";
         in
         {
@@ -58,6 +59,14 @@
               set -e
               ${cargo}
               exec ${pkgs.espflash}/bin/espflash flash --chip esp32c3 --monitor ${fw}
+            '');
+          };
+          probe = {
+            type = "app";
+            program = toString (pkgs.writeShellScript "probe" ''
+              set -e
+              ${cargo} --bin modem_probe
+              exec ${pkgs.espflash}/bin/espflash flash --chip esp32c3 --monitor ${probe}
             '');
           };
           monitor = {

@@ -97,6 +97,8 @@ fn generate_aio_config() {
     let mut user: Option<String> = None;
     let mut location_feed: Option<String> = None;
     let mut time_feed: Option<String> = None;
+    let mut owner: Option<String> = None;
+    let mut apn: Option<String> = None;
     let mut section = String::new();
 
     for raw in content.lines() {
@@ -128,6 +130,8 @@ fn generate_aio_config() {
             "user" => user = Some(val),
             "location_feed" => location_feed = Some(val),
             "time_feed" => time_feed = Some(val),
+            "owner" => owner = Some(val),
+            "apn" => apn = Some(val),
             _ => {}
         }
     }
@@ -138,6 +142,9 @@ fn generate_aio_config() {
     let user = user.expect("aio.user missing in adafruit.toml");
     let location_feed = location_feed.unwrap_or_else(|| "location".to_string());
     let time_feed = time_feed.unwrap_or_else(|| "time".to_string());
+    let owner = owner
+        .filter(|value| !value.is_empty() && value != "YOUR_OWNER_NUMBER")
+        .unwrap_or_default();
 
     fn esc(s: &str) -> String {
         s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -158,6 +165,14 @@ fn generate_aio_config() {
         esc(&time_feed)
     );
 
+    let code = format!("{}pub const CFG_OWNER: &str = \"{}\";\n", code, esc(&owner));
+
+    // APN is operator data, not a secret, but it belongs next to the key so
+    // one file configures a whole SIM swap.
+    let apn = apn
+        .filter(|value| !value.is_empty() && value != "YOUR_APN")
+        .unwrap_or_default();
+    let code = format!("{}pub const CFG_APN: &str = \"{}\";\n", code, esc(&apn));
     let out_dir = std::env::var("OUT_DIR").unwrap();
     std::fs::write(Path::new(&out_dir).join("aio_config.rs"), code).unwrap();
     println!("cargo:rerun-if-changed={}", config_path.display());

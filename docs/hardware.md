@@ -13,7 +13,7 @@ this board.
 |---|---|---|
 | GPIO4 | modem RXD | UART TX |
 | GPIO5 | modem TXD | UART RX |
-| GPIO6 | PWRKEY gate | N-MOSFET gate, **not** PWRKEY direct |
+| GPIO6 | PWRKEY gate | optional; N-MOSFET gate, **not** PWRKEY direct |
 | GPIO8 | LIS2DH SDA | onboard LED — remove it (see below) |
 | GPIO9 | LIS2DH SCL | |
 | 3V3 | LIS2DH VCC | fine, draws µA |
@@ -73,14 +73,15 @@ A full day of deep sleep is about 0.4 J. **One cold fix costs about 35 days of
 sleep.** This modelled ratio is why the firmware never acquires while parked,
 and why it reports a stale cached fix instead of re-fixing.
 
-Waking every 5 s to sample the accelerometer costs about 1.2 J/day — worth it,
-and small next to a fix.
+The shipping firmware uses LIS2DH INT1 deep-sleep wake; `POLL_MS` is only a
+conservative accounting increment for a motion wake, not a 5 s polling loop.
 
 ## Battery
 
 Li-ion cell + boost to 4.0 V, sized for the two supplies separately:
 
-- **C3 + LIS2DH** run from the cell's 3.7 V directly.
+- **C3 + LIS2DH** run from a regulated 3.3 V rail. Never connect a full 4.2 V
+  cell to the C3 3V3 pin.
 - **Modem** needs a boost converter that holds 4.0 V under a 2 A burst. A
   marginal one is the single most common cause of "it works on the bench but not
   in the chair" — brownouts look like flaky registration, not like power faults.
@@ -102,6 +103,29 @@ inductor and the Li-ion cell.
 - New-version boards auto-power when PWR is shorted to 3V3; if your board
   does this, `ensure_modem_on()` probes first and skips the PWRKEY pulse.
   Otherwise pulse PWRKEY ~1 s via the N-MOSFET gate.
+- **UART selection jumper (A/B/C).** The HAT routes the module UART to one
+  destination at a time, so the choice is exclusive:
+  - `A` — host header ↔ CP2102: log in to a Pi through the HAT's USB port.
+  - `B` — module ↔ host header: **use this**, it is the wiring above.
+  - `C` — module ↔ CP2102: AT console from a PC over the HAT's USB port.
+
+  `B` occupies two positions on the 2×4 header, one per column; move both
+  caps. With `B` the HAT's USB-to-UART port no longer reaches the modem, so
+  PC-side AT debugging needs `C` temporarily.
+- **VCCIO must be 3.3 V** (solder bridge on newer boards, jumper on older
+  ones). Measure the idle level on the modem TXD pin: it should sit near
+  3.3 V, not 5 V and not 1.8 V.
+- The USB-to-UART port's VBUS feeds the same 5 V rail as the header, so the
+  HAT can be powered from that port with only GND/TXD/RXD going to the C3.
+  Never connect two 5 V sources (header pin 1 plus USB) at the same time.
+- Control header pinout (silkscreen names): `1` 5V, `2` GND, `3` TXD
+  (module out), `4` RXD (module in), `15` PWR. Leave PWR, FLIGHT, P4 and P6
+  open. The same pair is on the 40-pin header at pin 8 (TXD) and pin 10
+  (RXD).
+- Current bench build has **no PWRKEY MOSFET**: keep PWR↔3V3 fitted for auto
+  power-on, PWR↔D6 and Flight↔D4 open, and GPIO6 unconnected. The firmware
+  still pulses GPIO6 when the first `AT` probe fails, which is harmless with
+  the gate floating.
 - Cold-start TTFF is about 1 minute in the open; the firmware's
   `FIX_DEADLINE_MS` (45 s) may need raising for a truly cold module.
 - GNSS antenna required; place the module label-side down in the open.
@@ -111,9 +135,13 @@ inductor and the Li-ion cell.
 Run in this order; each step gates the next. `firmware_rs/` covers all of
 these via its own code paths (`lis2dh::probe`, `sim7600::position`).
 
+0. **UART link.** `nix run .#probe` flashes the standalone AT probe. It needs
+   no SIM and no antenna: `AT`, `ATI` and `AT+CGMR` answering is the pass
+   condition. `+CME ERROR: 10` from `AT+CPIN?` (empty slot) and `+CSQ: 99,99`
+   are the correct replies without a card and antenna.
 1. **I2C scan.** The bus must list `0x19` (or `0x18` if SDO/SA0 is low).
    Nothing works until this passes.
-2. **LIS2DH register readback.** Confirm `WHO_AM_I` returns `0x32` and that
+2. **LIS2DH register readback.** Confirm `WHO_AM_I` returns `0x33` and that
    `OUT_X_L` changes when you tilt the device. Static readings mean the driver
    or the address is wrong, not the sensor.
 3. **Motion threshold tuning.** Shake the device and check the interrupt
@@ -124,9 +152,10 @@ these via its own code paths (`lis2dh::probe`, `sim7600::position`).
    sky view; indoors this will not succeed and that is expected).
 5. **SMS round trip.** Verify a ping arrives before trusting any of the above
    on battery.
-6. **PPP dial** (HTTP uplink). `ATD*99***1#` → `CONNECT` → IPCP negotiation →
-   HTTP POST. Verified over USB on this module (`10.0.68.103`, Adafruit IO
-   returns 200); still needs the ESP32 UART path exercised. See
+6. **AT+HTTP uplink**. Flash `http_probe`/`net_probe`: `+HTTPACTION: 1,200,...`
+   and the point appears in the Adafruit feed. ✔ 2026-11-05 over the ESP32
+   UART (SIM7600CE-T, Telkomsel). `PPP` (`ATD*99***1#`) was exercised but
+   port-80 traffic was reset on this path — do not use PPP. See
    `firmware_rs/README.md`.
 7. **Current draw.** Measure deep-sleep current with the LED removed. If it is
    above ~50 µA something else is awake — check for a floating pin or the modem

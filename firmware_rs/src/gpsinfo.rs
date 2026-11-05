@@ -156,10 +156,16 @@ fn parse_unix_time(date: &str, time: &str) -> Option<u32> {
     }
     let d: u32 = date[0..2].parse().ok()?;
     let mo: u32 = date[2..4].parse().ok()?;
+    if !(1..=31).contains(&d) || !(1..=12).contains(&mo) {
+        return None;
+    }
     let y: u32 = 2000 + date[4..6].parse::<u32>().ok()?;
     let h: u32 = time.get(0..2).and_then(|s| s.parse().ok()).unwrap_or(0);
     let mi: u32 = time.get(2..4).and_then(|s| s.parse().ok()).unwrap_or(0);
     let s: u32 = time.get(4..6).and_then(|s| s.parse().ok()).unwrap_or(0);
+    if h >= 24 || mi >= 60 || s >= 60 {
+        return None;
+    }
 
     let leap_years = (y - 1972) / 4 + 1;
     const CUM: [u32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
@@ -235,5 +241,12 @@ mod tests {
         let f = parse_position_line(line).unwrap();
         assert!(f.lat_e7 > 0);
         assert!(f.lon_e7 > 0);
+    }
+
+    #[test]
+    fn invalid_date_and_time_are_rejected() {
+        assert!(parse_unix_time("000000", "000000").is_none());
+        assert!(parse_unix_time("991399", "000000").is_none());
+        assert!(parse_unix_time("010125", "246000").is_none());
     }
 }

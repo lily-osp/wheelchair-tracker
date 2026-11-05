@@ -17,7 +17,6 @@
 use core::fmt::Write as _;
 
 use embassy_time::{Duration, Instant, Timer, with_timeout};
-use embedded_io_async::{BufRead, Write};
 use esp_hal::uart::Uart;
 use heapless::{String, Vec as HVec};
 
@@ -339,7 +338,9 @@ impl<'d> Sim7600<'d> {
                         core::array::from_fn(|_| String::new());
                     let got = self.buf.feed(&chunk[..n], &mut pending);
                     for line in &pending[..got] {
-                        if line.eq_ignore_ascii_case("CONNECT") {
+                        // SIMCom appends the DTE speed ("CONNECT 115200") on
+                        // some builds; the prefix is what matters.
+                        if line.len() >= 7 && line[..7].eq_ignore_ascii_case("CONNECT") {
                             return Ok(());
                         }
                         if classify(line) == LineKind::Err {
@@ -349,6 +350,37 @@ impl<'d> Sim7600<'d> {
                 }
                 Ok(Err(_)) => return Err(ModemError::Uart),
                 Err(_) => return Err(ModemError::Timeout),
+            }
+        }
+    }
+
+    /// Reads lines until one starts with `prefix` (case-insensitive). Used for
+    /// non-terminal replies: the `DOWNLOAD` prompt and `+HTTPACTION` URCs.
+    pub async fn wait_line(
+        &mut self,
+        prefix: &str,
+        timeout: Duration,
+    ) -> Option<String<LINE_CAP>> {
+        let mut pending: [String<LINE_CAP>; MAX_LINES] = core::array::from_fn(|_| String::new());
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.as_ticks() == 0 {
+                return None;
+            }
+            let mut chunk = [0u8; 256];
+            match with_timeout(remaining, self.uart.read_async(&mut chunk)).await {
+                Ok(Ok(n)) => {
+                    let got = self.buf.feed(&chunk[..n], &mut pending);
+                    for line in &pending[..got] {
+                        if line.len() >= prefix.len()
+                            && line[..prefix.len()].eq_ignore_ascii_case(prefix)
+                        {
+                            return Some(line.clone());
+                        }
+                    }
+                }
+                _ => return None,
             }
         }
     }
@@ -426,80 +458,6 @@ impl<'d> Sim7600<'d> {
                 }
             }
         }
-    }
-}
-
-/// `BufRead` adapter over the esp-hal async UART: `Runner::run` wants
-/// `fill_buf`/`consume`, which the UART does not provide natively.
-pub struct PppUart<'a, 'd> {
-    uart: &'a mut Uart<'d, esp_hal::Async>,
-    buf: [u8; 512],
-    pos: usize,
-    len: usize,
-}
-
-impl<'a, 'd> PppUart<'a, 'd> {
-    pub fn new(uart: &'a mut Uart<'d, esp_hal::Async>) -> Self {
-        Self {
-            uart,
-            buf: [0; 512],
-            pos: 0,
-            len: 0,
-        }
-    }
-}
-
-impl embedded_io::ErrorType for PppUart<'_, '_> {
-    type Error = core::convert::Infallible;
-}
-
-impl embedded_io_async::Read for PppUart<'_, '_> {
-    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
-        // Drain the internal fill buffer first, then the UART.
-        if self.pos < self.len {
-            let n = (self.len - self.pos).min(buf.len());
-            buf[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
-            self.pos += n;
-            return Ok(n);
-        }
-        Ok(self.uart.read_async(buf).await.unwrap_or(0))
-    }
-}
-
-impl BufRead for PppUart<'_, '_> {
-    async fn fill_buf(&mut self) -> Result<&[u8], Self::Error> {
-        if self.pos == self.len {
-            self.pos = 0;
-            self.len = match self.uart.read_async(&mut self.buf).await {
-                Ok(n) => n,
-                Err(_) => 0,
-            };
-            if self.len == 0 {
-                // Modem dropped the port: report EOF via an empty fill.
-                return Ok(&[]);
-            }
-        }
-        Ok(&self.buf[self.pos..self.len])
-    }
-
-    fn consume(&mut self, amt: usize) {
-        self.pos = (self.pos + amt).min(self.len);
-    }
-}
-
-impl Write for PppUart<'_, '_> {
-    async fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
-        // write_all semantics are required by the PPP protocol; the UART
-        // write_async buffers internally.
-        match self.uart.write_async(buf).await {
-            Ok(_) => Ok(buf.len()),
-            Err(_) => Ok(0),
-        }
-    }
-
-    async fn flush(&mut self) -> Result<(), Self::Error> {
-        let _ = self.uart.flush_async().await;
-        Ok(())
     }
 }
 

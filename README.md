@@ -3,8 +3,9 @@
 Motion-gated location tracker: ESP32-C3 Super Mini + SIM7600CE-T + LIS2DH.
 
 **Rust, `no_std`, esp-hal** — see `firmware_rs/`. The SIM7600 provides **both**
-GNSS and internet: the default uplink is SMS; an opt-in HTTP channel runs PPP
-over the modem's AT UART. The ESP32's own WiFi/BT radio is unused.
+GNSS and internet: the default uplink is HTTP through the module's own `AT+HTTP`
+stack (verified against Adafruit IO), with SMS as a fallback. The ESP32's own
+WiFi/BT radio is unused.
 
 **See `firmware_rs/README.md` for the full documentation** — build, flashing,
 pin map, power budget, runtime model, and the bench checklist.
@@ -74,10 +75,10 @@ The shipping design is:
         │  ESP32-C3    │◄───────►│  LIS2DH    │ ~3 µA
         │  SuperMini   │  INT1 ──┼──► GPIO0   │ wakes deep sleep
         └──────┬───────┘         └────────────┘
-               │ UART
+               │ UART (AT)
         ┌──────▼───────┐   own 4.0 V / 2 A supply
-        │  SIM7600CE-T │   GNSS + internet: SMS default,
-        └──────┬───────┘   HTTP over PPP opt-in
+        │  SIM7600CE-T │   GNSS + internet: AT+HTTP (default),
+        └──────┬───────┘   SMS fallback
                │
         ┌──────▼────────────────────────────────────┐
         │  Li-ion → boost 4.0 V (modem)            │
@@ -107,27 +108,26 @@ for this module.
 ## Status
 
 All parsing/classification/validation logic is verified by the host test suite
-(39 tests, `cargo test` in `firmware_rs/`). First hardware smoke test passed
+(40 tests, `cargo test` in `firmware_rs/`). First hardware smoke test passed
 (2026-10-29, ESP32-C3 SuperMini, no peripherals): flash, boot, esp-hal/esp-rtos
 init, RTC-fast state persistence, exact `mono_ms` restoration on timer wake,
 and a stable wake → classify → report → deep-sleep loop — no panics.
 
-**Still bench-pending:** the SIM7600 UART transport on the ESP32 (GPIO4/5),
-LIS2DH I2C reads, INT1 GPIO wake, `AT+CPOF` recovery, and measured sleep
-current — everything that needs the peripherals wired. `docs/hardware.md`
-carries the bench checklist.
+**Bench-verified on 2026-11-05 (ESP32-C3 ↔ SIM7600CE-T, SIM+antennas):** AT
+link, SIM ready, signal/registration (Telkomsel, LTE), GNSS fix, and an
+**end-to-end HTTP POST to Adafruit IO returning 200** via the module's
+`AT+HTTP` stack (`http_probe` and `net_probe`, point `http-probe` / `net-probe`
+landed in the `location` feed). `PPP dial` (`ATD*99***1#`) was also exercised:
+the TCP handshake completed but the first request was reset with zero bytes
+returned on this carrier/firmware, so **PPP is not the uplink path**; `AT+HTTP`
+is.
 
-The modem was verified over USB on 2026-10-31: identity, SIM, signal,
-operator (Telkomsel), registration, APN `cmnet`, IP `10.0.68.103`, cellular
-DNS, SMS round trip, GNSS fix (real coordinates), and PPP dial + HTTP POST to
-Adafruit IO (200 OK). Those findings are encoded in
-`firmware_rs/src/at.rs` and `sim7600.rs`. The HTTP uplink now targets
-Adafruit IO feeds `location` and `time` (key/username/feed names live in
-`firmware_rs/adafruit.toml`, not in source).
-
-**The full tracker path has not run with a LIS2DH attached yet.** Run
-[`docs/hardware.md`](docs/hardware.md)'s bench checklist in order before
-trusting anything. (Board-only smoke test passed — see above.)
+**Still bench-pending:** LIS2DH I2C reads, INT1 GPIO wake, `AT+CPOF` recovery,
+deep-sleep current, and a live report from the full `firmware_rs` image with
+GNSS coordinates. A clean serial log of the full image also needs a fresh USB
+enumeration (USB-JTAG re-enumerated after flash on this bench; replug/monitor
+to confirm). Run [`docs/hardware.md`](docs/hardware.md)'s bench checklist
+before trusting anything.
 
 ## Privacy
 

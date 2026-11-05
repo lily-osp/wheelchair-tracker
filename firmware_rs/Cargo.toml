@@ -11,6 +11,36 @@ name = "firmware_rs"
 path = "./src/bin/main.rs"
 required-features = ["firmware"]
 
+# Bench-only path: raw AT probe, no LIS2DH, no sleep. See docs/hardware.md.
+[[bin]]
+name = "modem_probe"
+path = "./src/bin/modem_probe.rs"
+required-features = ["firmware"]
+
+# Bench-only path: registration, DNS, PPP dial, one Adafruit IO POST.
+[[bin]]
+name = "net_probe"
+path = "./src/bin/net_probe.rs"
+required-features = ["firmware"]
+
+# Bench-only path: raw dial dump.
+[[bin]]
+name = "dial_probe"
+path = "./src/bin/dial_probe.rs"
+required-features = ["firmware"]
+
+# Bench-only path: module-side AT+HTTP stack, no PPP.
+[[bin]]
+name = "http_probe"
+path = "./src/bin/http_probe.rs"
+required-features = ["firmware"]
+
+# Bench-only path: full report flow (modem+GNSS+AT+HTTP) without deep sleep.
+[[bin]]
+name = "report_probe"
+path = "./src/bin/report_probe.rs"
+required-features = ["firmware"]
+
 # Host tests (`cargo test --no-default-features`) build only the pure logic;
 # the firmware feature pulls in the HAL and the async stack.
 [features]
@@ -21,15 +51,10 @@ firmware = [
     "dep:esp-bootloader-esp-idf",
     "dep:embassy-executor",
     "dep:embassy-time",
-    "dep:embassy-net",
-    "dep:embassy-net-ppp",
     "dep:esp-println",
     "dep:esp-backtrace",
     "dep:critical-section",
     "dep:static_cell",
-    "dep:embassy-futures",
-    "dep:embedded-io",
-    "dep:embedded-io-async",
 ]
 
 [dependencies]
@@ -41,12 +66,6 @@ esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c3"], optional =
 
 embassy-executor = { version = "0.10.0", optional = true }
 embassy-time = { version = "0.5.0", optional = true }
-embassy-net = { version = "0.9", optional = true, default-features = false, features = [
-    "proto-ipv4",
-    "medium-ip",
-    "tcp",
-] }
-embassy-net-ppp = { version = "0.3", optional = true }
 esp-backtrace = { version = "0.20.0", features = [
   "esp32c3",
   "panic-handler",
@@ -59,9 +78,6 @@ critical-section = { version = "1.2.0", optional = true }
 static_cell = { version = "2.1.1", optional = true }
 heapless = "0.9"
 embedded-hal = "1.0"
-embassy-futures = { version = "0.1", optional = true }
-embedded-io = { version = "0.7", optional = true }
-embedded-io-async = { version = "0.7", optional = true }
 
 
 # For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html

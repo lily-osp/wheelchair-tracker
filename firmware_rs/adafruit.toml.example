@@ -5,3 +5,7 @@ key = "YOUR_AIO_KEY"
 user = "YOUR_AIO_USERNAME"
 location_feed = "location"
 time_feed = "time"
+owner = "YOUR_OWNER_NUMBER"
+# Carrier APN for the PDP context. Telkomsel: "internet". Empty = use the
+# SIM's own default.
+apn = "YOUR_APN"
