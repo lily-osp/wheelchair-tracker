@@ -92,24 +92,24 @@ fn main() -> ! {
         else { esp_println::println!("  {} read err", name); }
     }
 
-    esp_println::println!("streaming raw OUT + magnitude; tilt/shake to test");
+    esp_println::println!("streaming mag + GPIO0(INT1) level; SHAKE/TILT now (INT1_SRC read/cleared only on change)");
+    let mut last_src = 0u8;
     loop {
-        use embedded_hal::i2c::I2c;
-        let mut out = [0u8; 6];
-        // 0x80 = auto-increment for multi-byte read.
-        let ok = i2c.write_read(addr, &[0x28 | 0x80], &mut out).is_ok();
         let mag = {
             let mut imu = Lis2dh::new(&mut i2c, addr);
             imu.magnitude(200)
         };
         let int1_level = imu_int.is_high();
+        // Read SRC to observe latch, but note: reading clears it (pin may drop).
+        // Sample GPIO0 first; also show SRC.
+        use embedded_hal::i2c::I2c;
         let mut src = [0u8; 1];
         let _ = i2c.write_read(addr, &[0x31], &mut src);
-        esp_println::println!(
-            "ok={} out=[{:02x} {:02x} {:02x} {:02x} {:02x} {:02x}] mag={} int1={} src=0x{:02x}",
-            ok, out[0], out[1], out[2], out[3], out[4], out[5], mag, int1_level, src[0]
-        );
-        delay.delay_millis(500);
+        if int1_level || src[0] != last_src || (mag - 1000).abs() > 150 {
+            esp_println::println!("mag={} delta={} int1_gpio0={} src=0x{:02x}", mag, (mag - 1000).abs(), int1_level, src[0]);
+        }
+        last_src = src[0];
+        delay.delay_millis(100);
     }
 }
 
