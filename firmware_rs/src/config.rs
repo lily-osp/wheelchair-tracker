@@ -16,8 +16,9 @@ pub const IMU_SDA: u8 = 8;
 pub const IMU_SCL: u8 = 9;
 /// LIS2DH INT1, RTC pin 0-5 wakes deep sleep on the C3.
 pub const IMU_INT1: u8 = 0;
-/// 0x19 with SDO/SA0 high (usual breakout), 0x18 pulled low.
-pub const IMU_ADDR: u8 = 0x19;
+/// 0x19 with SDO/SA0 high, 0x18 pulled low. Bench-verified at 0x18
+/// (SA0/SDO low) on 2026-11-05.
+pub const IMU_ADDR: u8 = 0x18;
 /// 250 mg at 16 mg/digit in LIS2DH low-power mode.
 pub const IMU_THRESHOLD: u8 = 16;
 pub const IMU_DURATION: u8 = 2;

@@ -41,6 +41,12 @@ name = "report_probe"
 path = "./src/bin/report_probe.rs"
 required-features = ["firmware"]
 
+# Bench-only path: LIS2DH I2C + INT1, no modem.
+[[bin]]
+name = "imu_probe"
+path = "./src/bin/imu_probe.rs"
+required-features = ["firmware"]
+
 # Host tests (`cargo test --no-default-features`) build only the pure logic;
 # the firmware feature pulls in the HAL and the async stack.
 [features]

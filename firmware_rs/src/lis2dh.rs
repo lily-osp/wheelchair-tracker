@@ -22,6 +22,8 @@ pub const INT1_SRC: u8 = 0x31;
 pub const INT1_THS: u8 = 0x32;
 pub const INT1_DUR: u8 = 0x33;
 pub const OUT_X_L: u8 = 0x28;
+/// Set MSB for register auto-increment on multi-byte reads.
+const AUTO_INC: u8 = 0x80;
 
 /// CTRL_REG1: LPen=1 low-power, BDU=1 block update, XYZ_EN=111, ODR=10 Hz -
 /// the lowest rate that still gates reliably.
@@ -109,7 +111,7 @@ impl<B: I2c> Lis2dh<B> {
         use embedded_hal::i2c::Operation;
         let mut b = [0u8; 6];
         self.bus.transaction(self.addr, &mut [
-            Operation::Write(&[OUT_X_L]),
+            Operation::Write(&[OUT_X_L | AUTO_INC]),
             Operation::Read(&mut b),
         ])?;
 
@@ -271,7 +273,8 @@ mod tests {
                             self.model.borrow_mut().regs[w[0] as usize] = w[1];
                             next_reg = None;
                         } else if w.len() == 1 {
-                            next_reg = Some(w[0]);
+                            // Mask auto-increment bit for register addressing.
+                            next_reg = Some(w[0] & 0x7F);
                         }
                     }
                     embedded_hal::i2c::Operation::Read(r) => {
