@@ -22,7 +22,7 @@ use heapless::String;
 use static_cell::StaticCell;
 
 use firmware_rs::config as cfg;
-use firmware_rs::gpsinfo::GpsFix;
+use firmware_rs::gpsinfo::Fix;
 use firmware_rs::sim7600::Sim7600;
 use firmware_rs::uplink;
 
@@ -57,7 +57,12 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         idle().await;
     }
     let up = sim.bring_up(Some(cfg::APN)).await;
-    esp_println::println!("bring_up={} apn=\"{}\" sim={}", up, cfg::APN, sim.sim_status().await);
+    esp_println::println!(
+        "bring_up={} apn=\"{}\" sim={}",
+        up,
+        cfg::APN,
+        sim.sim_status().await
+    );
     esp_println::println!(
         "csq={} dBm registered={} attached={}",
         sim.signal().await,
@@ -65,7 +70,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         sim.is_attached().await
     );
 
-    esp_println::println!("acquiring GNSS fix (deadline {} ms)...", cfg::FIX_DEADLINE_MS);
+    esp_println::println!(
+        "acquiring GNSS fix (deadline {} ms)...",
+        cfg::FIX_DEADLINE_MS
+    );
     let fix = acquire_fix(&mut sim).await;
     match fix {
         Some(f) => esp_println::println!(
@@ -122,7 +130,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     idle().await
 }
 
-async fn acquire_fix(sim: &mut Sim7600<'_>) -> Option<GpsFix> {
+async fn acquire_fix(sim: &mut Sim7600<'_>) -> Option<Fix> {
     if !sim.gnss_on().await {
         esp_println::println!("gnss_on failed");
         return None;

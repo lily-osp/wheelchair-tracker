@@ -44,10 +44,7 @@ fn main() -> ! {
     for &addr in &[0x19u8, 0x18u8] {
         // Read WHO_AM_I raw for diagnostics.
         let mut who = [0u8; 1];
-        let who_res = {
-            use embedded_hal::i2c::I2c;
-            i2c.write_read(addr, &[0x0F], &mut who)
-        };
+        let who_res = i2c.write_read(addr, &[0x0F], &mut who);
         match who_res {
             Ok(()) => esp_println::println!("addr 0x{:02x}: WHO_AM_I=0x{:02x}", addr, who[0]),
             Err(_) => esp_println::println!("addr 0x{:02x}: WHO_AM_I read NACK/bus error", addr),
@@ -63,36 +60,51 @@ fn main() -> ! {
         }
     }
     let Some(addr) = found_addr else {
-        esp_println::println!("no LIS2DH found at 0x19/0x18; check VCC/GND/SDA/SCL/pullups, SA0, and GPIO8 onboard LED removal");
+        esp_println::println!(
+            "no LIS2DH found at 0x19/0x18; check VCC/GND/SDA/SCL/pullups, SA0, and GPIO8 onboard LED removal"
+        );
         idle(&delay);
     };
 
     {
         let mut imu = Lis2dh::new(&mut i2c, addr);
-        if imu.configure(cfg::IMU_THRESHOLD, cfg::IMU_DURATION).is_err() {
+        if imu
+            .configure(cfg::IMU_THRESHOLD, cfg::IMU_DURATION)
+            .is_err()
+        {
             esp_println::println!("configure=BUS-ERROR");
             idle(&delay);
         }
         esp_println::println!(
             "configured @0x{:02x}: threshold={} (1/16 g), duration={} samples",
-            addr, cfg::IMU_THRESHOLD, cfg::IMU_DURATION
+            addr,
+            cfg::IMU_THRESHOLD,
+            cfg::IMU_DURATION
         );
         let _ = imu.clear_interrupt();
     }
 
     // Dump key regs for diagnosis.
     for (name, reg) in [
-        ("CTRL1", 0x20u8), ("CTRL4", 0x23u8), ("STATUS", 0x27u8),
-        ("INT1_CFG", 0x30u8), ("INT1_SRC", 0x31u8), ("CTRL3", 0x22u8),
+        ("CTRL1", 0x20u8),
+        ("CTRL4", 0x23u8),
+        ("STATUS", 0x27u8),
+        ("INT1_CFG", 0x30u8),
+        ("INT1_SRC", 0x31u8),
+        ("CTRL3", 0x22u8),
     ] {
-        use embedded_hal::i2c::I2c;
         let mut v = [0u8; 1];
         let ok = i2c.write_read(addr, &[reg], &mut v).is_ok();
-        if ok { esp_println::println!("  {}(0x{:02x})=0x{:02x}", name, reg, v[0]); }
-        else { esp_println::println!("  {} read err", name); }
+        if ok {
+            esp_println::println!("  {}(0x{:02x})=0x{:02x}", name, reg, v[0]);
+        } else {
+            esp_println::println!("  {} read err", name);
+        }
     }
 
-    esp_println::println!("streaming mag + GPIO0(INT1) level; SHAKE/TILT now (INT1_SRC read/cleared only on change)");
+    esp_println::println!(
+        "streaming mag + GPIO0(INT1) level; SHAKE/TILT now (INT1_SRC read/cleared only on change)"
+    );
     let mut last_src = 0u8;
     loop {
         let mag = {
@@ -102,11 +114,16 @@ fn main() -> ! {
         let int1_level = imu_int.is_high();
         // Read SRC to observe latch, but note: reading clears it (pin may drop).
         // Sample GPIO0 first; also show SRC.
-        use embedded_hal::i2c::I2c;
         let mut src = [0u8; 1];
         let _ = i2c.write_read(addr, &[0x31], &mut src);
         if int1_level || src[0] != last_src || (mag - 1000).abs() > 150 {
-            esp_println::println!("mag={} delta={} int1_gpio0={} src=0x{:02x}", mag, (mag - 1000).abs(), int1_level, src[0]);
+            esp_println::println!(
+                "mag={} delta={} int1_gpio0={} src=0x{:02x}",
+                mag,
+                (mag - 1000).abs(),
+                int1_level,
+                src[0]
+            );
         }
         last_src = src[0];
         delay.delay_millis(100);

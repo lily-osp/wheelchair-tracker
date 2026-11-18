@@ -35,13 +35,10 @@ fn main() -> ! {
     // Held low and never pulsed: the HAT auto-powers from PWR-3V3.
     let _pwrkey = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());
 
-    let mut uart = Uart::new(
-        peripherals.UART1,
-        UartConfig::default().with_baudrate(BAUD),
-    )
-    .unwrap()
-    .with_rx(peripherals.GPIO5)
-    .with_tx(peripherals.GPIO4);
+    let mut uart = Uart::new(peripherals.UART1, UartConfig::default().with_baudrate(BAUD))
+        .unwrap()
+        .with_rx(peripherals.GPIO5)
+        .with_tx(peripherals.GPIO4);
 
     esp_println::println!(
         "\nmodem_probe: UART1 {} 8N1, TX=GPIO4 RX=GPIO5\nwaiting for the module...",
@@ -86,9 +83,7 @@ fn main() -> ! {
     send(&mut uart, &delay, "AT+CPSI?", 1_000);
     send(&mut uart, &delay, "AT+CGPS?", 1_000);
 
-    esp_println::println!(
-        "\nlink is up. CSQ poll every 5 s (99,99 = no antenna/SIM, expected):"
-    );
+    esp_println::println!("\nlink is up. CSQ poll every 5 s (99,99 = no antenna/SIM, expected):");
     loop {
         send(&mut uart, &delay, "AT+CSQ", 1_500);
         delay.delay_millis(3_500);

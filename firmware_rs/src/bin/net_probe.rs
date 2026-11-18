@@ -93,7 +93,12 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         cfg::AIO_KEY
     );
 
-    esp_println::println!("posting to {}/api/v2/{}/feeds/{}/data...", cfg::SERVER_HOST, cfg::AIO_USER, cfg::AIO_FEED_LOCATION);
+    esp_println::println!(
+        "posting to {}/api/v2/{}/feeds/{}/data...",
+        cfg::SERVER_HOST,
+        cfg::AIO_USER,
+        cfg::AIO_FEED_LOCATION
+    );
     let body = br#"{"value":"net-probe"}"#;
     match uplink::post_json(&mut sim, url.as_str(), body).await {
         Ok(status) => esp_println::println!("POST {}: Adafruit IO accepted the point", status),

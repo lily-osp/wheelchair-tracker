@@ -49,9 +49,7 @@ pub fn parse_position_line(line: &str) -> Option<Fix> {
     // markers instead of assuming fixed indices.
     const N: usize = 24;
     let mut fields: [String<32>; N] = Default::default();
-    let Some(colon) = line.find(':') else {
-        return None;
-    };
+    let colon = line.find(':')?;
     let body = line[colon + 1..].trim_start();
     let mut nfields = 0usize;
     // Split on commas, keeping empty fields. Stop at N.
@@ -95,17 +93,15 @@ pub fn parse_position_line(line: &str) -> Option<Fix> {
     // Find first N/S hemisphere marker.
     let mut lat_idx: Option<usize> = None;
     let mut lon_idx: Option<usize> = None;
-    for k in 0..nfields {
-        match fields[k].as_str() {
+    for (k, field) in fields.iter().enumerate().take(nfields) {
+        match field.as_str() {
             "N" | "S" => {
                 if lat_idx.is_none() {
                     lat_idx = Some(k);
                 }
             }
-            "E" | "W" => {
-                if lon_idx.is_none() && lat_idx.is_some() {
-                    lon_idx = Some(k);
-                }
+            "E" | "W" if lon_idx.is_none() && lat_idx.is_some() => {
+                lon_idx = Some(k);
             }
             _ => {}
         }
@@ -119,8 +115,16 @@ pub fn parse_position_line(line: &str) -> Option<Fix> {
     let lon_e7 = parse_hemisphere(fields[oi - 1].as_str(), fields[oi].as_str())?;
 
     // Date/time follow the E/W marker.
-    let date = if oi + 1 < nfields { fields[oi + 1].as_str() } else { "" };
-    let time = if oi + 2 < nfields { fields[oi + 2].as_str() } else { "" };
+    let date = if oi + 1 < nfields {
+        fields[oi + 1].as_str()
+    } else {
+        ""
+    };
+    let time = if oi + 2 < nfields {
+        fields[oi + 2].as_str()
+    } else {
+        ""
+    };
     let unix_time = parse_unix_time(date, time).unwrap_or(0);
 
     Some(Fix {
@@ -177,7 +181,7 @@ fn parse_unix_time(date: &str, time: &str) -> Option<u32> {
 }
 
 fn is_leap(y: u32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 #[cfg(test)]

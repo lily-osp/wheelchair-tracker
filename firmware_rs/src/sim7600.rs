@@ -21,7 +21,7 @@ use esp_hal::uart::Uart;
 use heapless::{String, Vec as HVec};
 
 use crate::at::{
-    AtResult, LINE_CAP, LineKind, LineBuffer, classify, cme_code, field, find, first_non_empty,
+    AtResult, LINE_CAP, LineBuffer, LineKind, classify, cme_code, field, find, first_non_empty,
     valid_apn, valid_body, valid_number,
 };
 
@@ -53,8 +53,7 @@ impl CommandOutput {
 
     /// First line with `prefix`.
     pub fn line_with(&self, prefix: &str) -> Option<&str> {
-        let strs: HVec<&str, MAX_LINES> =
-            HVec::from_iter(self.lines.iter().map(|s| s.as_str()));
+        let strs: HVec<&str, MAX_LINES> = HVec::from_iter(self.lines.iter().map(|s| s.as_str()));
         find(strs.iter().copied(), prefix)
     }
 
@@ -67,8 +66,7 @@ impl CommandOutput {
 
     /// First non-empty payload line - for bare-value action replies.
     pub fn bare_value(&self) -> Option<&str> {
-        let strs: HVec<&str, MAX_LINES> =
-            HVec::from_iter(self.lines.iter().map(|s| s.as_str()));
+        let strs: HVec<&str, MAX_LINES> = HVec::from_iter(self.lines.iter().map(|s| s.as_str()));
         first_non_empty(strs.iter().copied())
     }
 }
@@ -94,7 +92,7 @@ impl<'d> Sim7600<'d> {
 
     /// The UART, for the caller that hands it to the PPP runner.
     pub fn uart_mut(&mut self) -> &mut Uart<'d, esp_hal::Async> {
-        &mut self.uart
+        self.uart
     }
 
     /// Discards buffered input - after a baud change or a hard reset.
@@ -142,7 +140,9 @@ impl<'d> Sim7600<'d> {
     /// Wait for the module to answer AT. Call after pulsing PWRKEY.
     pub async fn sync(&mut self, attempts: u8, delay_ms: u32) -> bool {
         for _ in 0..attempts {
-            let out = self.send_and_read("AT", Duration::from_millis(1000), None).await;
+            let out = self
+                .send_and_read("AT", Duration::from_millis(1000), None)
+                .await;
             if out.is_some_and(|o| o.res.ok) {
                 return true;
             }
@@ -192,11 +192,7 @@ impl<'d> Sim7600<'d> {
             return -999;
         }
         let v: i32 = out.value("+CSQ", 0).parse().unwrap_or(99);
-        if v == 99 {
-            -999
-        } else {
-            -113 + 2 * v
-        }
+        if v == 99 { -999 } else { -113 + 2 * v }
     }
 
     /// Registered: home (1) or roaming (5).
@@ -273,10 +269,10 @@ impl<'d> Sim7600<'d> {
     /// capability set of this firmware build is unverified - issue #7).
     pub async fn position(&mut self) -> Option<crate::gpsinfo::Fix> {
         let out = self.command("AT+CGNSSINFO", None).await;
-        if out.res.ok {
-            if let Some(l) = out.line_with("+CGNSSINFO") {
-                return crate::gpsinfo::parse_position_line(l);
-            }
+        if out.res.ok
+            && let Some(l) = out.line_with("+CGNSSINFO")
+        {
+            return crate::gpsinfo::parse_position_line(l);
         }
         let out = self.command("AT+CGPSINFO", None).await;
         out.line_with("+CGPSINFO")
@@ -298,7 +294,10 @@ impl<'d> Sim7600<'d> {
         // Phase 1: send, wait for the '>' prompt.
         let _ = self.uart.write(cmd.as_bytes());
         let _ = self.uart.write(b"\r\n");
-        let Some(_) = self.read_lines(Duration::from_millis(20_000), Some(">")).await else {
+        let Some(_) = self
+            .read_lines(Duration::from_millis(20_000), Some(">"))
+            .await
+        else {
             return Err(ModemError::Timeout);
         };
         // Phase 2: body plus CR before Ctrl-Z; without the CR some firmware
@@ -356,11 +355,7 @@ impl<'d> Sim7600<'d> {
 
     /// Reads lines until one starts with `prefix` (case-insensitive). Used for
     /// non-terminal replies: the `DOWNLOAD` prompt and `+HTTPACTION` URCs.
-    pub async fn wait_line(
-        &mut self,
-        prefix: &str,
-        timeout: Duration,
-    ) -> Option<String<LINE_CAP>> {
+    pub async fn wait_line(&mut self, prefix: &str, timeout: Duration) -> Option<String<LINE_CAP>> {
         let mut pending: [String<LINE_CAP>; MAX_LINES] = core::array::from_fn(|_| String::new());
         let deadline = Instant::now() + timeout;
         loop {
@@ -428,8 +423,7 @@ impl<'d> Sim7600<'d> {
                                 return Some(out);
                             }
                             LineKind::Err => {
-                                if line.starts_with("+CME ERROR")
-                                    || line.starts_with("+CMS ERROR")
+                                if line.starts_with("+CME ERROR") || line.starts_with("+CMS ERROR")
                                 {
                                     out.res.cme_code = cme_code(line);
                                 }

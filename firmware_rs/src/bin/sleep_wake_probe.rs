@@ -77,7 +77,9 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         let _ = imu.clear_interrupt();
         esp_println::println!(
             "imu configured @0x{:02x} threshold={} duration={}",
-            addr, cfg::IMU_THRESHOLD, cfg::IMU_DURATION
+            addr,
+            cfg::IMU_THRESHOLD,
+            cfg::IMU_DURATION
         );
     }
 
@@ -87,7 +89,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     let _ = Lis2dh::new(&mut i2c, addr).clear_interrupt();
 
     let sleep_ms: u64 = 10 * 60 * 1000; // 10 min watchdog
-    esp_println::println!("entering deep sleep for {} ms; SHAKE/TILT to wake via LIS2 INT1", sleep_ms);
+    esp_println::println!(
+        "entering deep sleep for {} ms; SHAKE/TILT to wake via LIS2 INT1",
+        sleep_ms
+    );
 
     let mut lp = LowPower::new(peripherals.LPWR);
     lp.set_wakeup_deadline(

@@ -20,7 +20,13 @@ fn main() -> ! {
     drain(&mut uart, &delay, 300);
     cmd(&mut uart, &delay, "AT", 600, true);
     cmd(&mut uart, &delay, "ATE0", 400, true);
-    cmd(&mut uart, &delay, "AT+CGDCONT=1,\"IP\",\"internet\"", 600, true);
+    cmd(
+        &mut uart,
+        &delay,
+        "AT+CGDCONT=1,\"IP\",\"internet\"",
+        600,
+        true,
+    );
     cmd(&mut uart, &delay, "AT+CGACT?", 600, true);
     cmd(&mut uart, &delay, "AT+CGACT=1,1", 2_000, true);
     cmd(&mut uart, &delay, "AT+CGPADDR=1", 800, true);
@@ -72,10 +78,7 @@ fn raw(uart: &mut Uart<'_, esp_hal::Blocking>, delay: &Delay, wait_ms: u32) {
                 if (0x20..0x7f).contains(&b) {
                     let _ = line.push(b as char);
                 } else {
-                    let _ = core::fmt::Write::write_fmt(
-                        &mut line,
-                        format_args!("\\x{:02x}", b),
-                    );
+                    let _ = core::fmt::Write::write_fmt(&mut line, format_args!("\\x{:02x}", b));
                 }
             }
         }

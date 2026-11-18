@@ -21,14 +21,20 @@ pub const RX_CAP: usize = 1024;
 /// prefix with a URC (+CPIN, +CEREG, +CREG, +CGREG, +CMSS, +CDEL) are absent
 /// on purpose.
 const URC_PREFIXES: [&str; 11] = [
-    "+CMTI", "+CMT", "+CUSD", "+CGEV", "+CIEV", "+CRING", "+RING", "+POLL",
-    "+PBREADY", "+CTS", "+CERR",
+    "+CMTI", "+CMT", "+CUSD", "+CGEV", "+CIEV", "+CRING", "+RING", "+POLL", "+PBREADY", "+CTS",
+    "+CERR",
 ];
 
 /// "ERROR" first: plain ERROR is the base form, +CME/+CMS are qualified
 /// variants matched by prefix.
-const TERMINAL_ERR: [&str; 6] =
-    ["ERROR", "+CME ERROR", "+CMS ERROR", "NO CARRIER", "ABORTED", "BUSY"];
+const TERMINAL_ERR: [&str; 6] = [
+    "ERROR",
+    "+CME ERROR",
+    "+CMS ERROR",
+    "NO CARRIER",
+    "ABORTED",
+    "BUSY",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
@@ -120,6 +126,12 @@ impl LineBuffer {
             }
         }
         produced
+    }
+}
+
+impl Default for LineBuffer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -223,9 +235,7 @@ pub fn first_non_empty<'a, I: IntoIterator<Item = &'a str>>(lines: I) -> Option<
 pub fn valid_number(number: &str) -> Option<String<24>> {
     let mut clean = String::new();
     for c in number.chars() {
-        if c.is_ascii_digit() {
-            let _ = clean.push(c);
-        } else if c == '+' && clean.is_empty() {
+        if c.is_ascii_digit() || (c == '+' && clean.is_empty()) {
             let _ = clean.push(c);
         } else if c == ' ' || c == '-' || c == '(' || c == ')' {
             continue;
@@ -242,7 +252,8 @@ pub fn valid_number(number: &str) -> Option<String<24>> {
 
 pub fn valid_apn(apn: &str) -> bool {
     !(apn.is_empty() || apn.len() > 64)
-        && apn.chars()
+        && apn
+            .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
@@ -255,11 +266,7 @@ pub fn valid_host(host: &str) -> bool {
 
 /// One GSM-7 segment: 160 chars, no control characters.
 pub fn valid_body(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= 160
-        && text
-            .chars()
-            .all(|c| c.is_ascii_graphic() || c == ' ')
+    !text.is_empty() && text.len() <= 160 && text.chars().all(|c| c.is_ascii_graphic() || c == ' ')
 }
 
 #[cfg(test)]
@@ -354,12 +361,18 @@ mod tests {
     #[test]
     fn number_validation() {
         assert!(valid_number("+6281234567890").is_some());
-        assert_eq!(valid_number("+62 812-3456-7890").unwrap().as_str(), "+6281234567890");
+        assert_eq!(
+            valid_number("+62 812-3456-7890").unwrap().as_str(),
+            "+6281234567890"
+        );
         assert!(valid_number("0812345678").is_some());
         assert!(valid_number("bad number!").is_none(), "injection rejected");
         assert!(valid_number("12").is_none(), "too short");
         assert!(valid_number("+62123456789012345").is_none(), "too long");
-        assert!(valid_number("6281x\r\nAT+CMGS=\"x\"").is_none(), "CR injection");
+        assert!(
+            valid_number("6281x\r\nAT+CMGS=\"x\"").is_none(),
+            "CR injection"
+        );
     }
 
     #[test]
@@ -377,7 +390,10 @@ mod tests {
 
         assert!(valid_body("M 106.845,-6.21 s4 a42s tick")); // ASCII only
         assert!(!valid_body(""));
-        assert!(!valid_body("body\r\nAT+CMGS=\"x\""), "control chars rejected");
+        assert!(
+            !valid_body("body\r\nAT+CMGS=\"x\""),
+            "control chars rejected"
+        );
         assert!(!valid_body(&"x".repeat(161)));
     }
 }

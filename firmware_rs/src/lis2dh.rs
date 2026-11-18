@@ -60,10 +60,10 @@ impl<B: I2c> Lis2dh<B> {
     fn read_reg(&mut self, reg: u8) -> Result<u8, B::Error> {
         use embedded_hal::i2c::Operation;
         let mut out = [0u8; 1];
-        self.bus.transaction(self.addr, &mut [
-            Operation::Write(&[reg]),
-            Operation::Read(&mut out),
-        ])?;
+        self.bus.transaction(
+            self.addr,
+            &mut [Operation::Write(&[reg]), Operation::Read(&mut out)],
+        )?;
         Ok(out[0])
     }
 
@@ -110,10 +110,13 @@ impl<B: I2c> Lis2dh<B> {
     fn read_accel(&mut self) -> Result<[i16; 3], B::Error> {
         use embedded_hal::i2c::Operation;
         let mut b = [0u8; 6];
-        self.bus.transaction(self.addr, &mut [
-            Operation::Write(&[OUT_X_L | AUTO_INC]),
-            Operation::Read(&mut b),
-        ])?;
+        self.bus.transaction(
+            self.addr,
+            &mut [
+                Operation::Write(&[OUT_X_L | AUTO_INC]),
+                Operation::Read(&mut b),
+            ],
+        )?;
 
         // Low-power mode exposes an 8-bit signed sample in OUT*_H at
         // 16 mg/digit in the ±2 g range.
@@ -127,7 +130,10 @@ impl<B: I2c> Lis2dh<B> {
     /// Vector magnitude in mg, ~1000 when still, -1 on a failed read.
     pub fn magnitude(&mut self, max_polls: u32) -> i32 {
         match self.accel(max_polls) {
-            Ok([x, y, z]) => isqrt((x as i64 * x as i64 + y as i64 * y as i64 + z as i64 * z as i64) as u64) as i32,
+            Ok([x, y, z]) => {
+                isqrt((x as i64 * x as i64 + y as i64 * y as i64 + z as i64 * z as i64) as u64)
+                    as i32
+            }
             Err(_) => -1,
         }
     }
@@ -223,7 +229,6 @@ mod tests {
     struct Model {
         regs: [u8; 256],
     }
-
 
     impl Model {
         fn new() -> Self {
@@ -351,13 +356,7 @@ mod tests {
         let model = Rc::new(RefCell::new(Model::new()));
         model.borrow_mut().regs[WHO_AM_I as usize] = 0x33;
         model.borrow_mut().regs[STATUS_REG as usize] = 0x08;
-        let mut imu = Lis2dh::new(
-            FakeI2c {
-                model,
-                fail: true,
-            },
-            0x19,
-        );
+        let mut imu = Lis2dh::new(FakeI2c { model, fail: true }, 0x19);
         assert_eq!(imu.magnitude(10), -1);
     }
 
@@ -388,13 +387,7 @@ mod tests {
     fn is_moving_false_on_bus_error() {
         let model = Rc::new(RefCell::new(Model::new()));
         model.borrow_mut().regs[WHO_AM_I as usize] = 0x33;
-        let mut imu = Lis2dh::new(
-            FakeI2c {
-                model,
-                fail: true,
-            },
-            0x19,
-        );
+        let mut imu = Lis2dh::new(FakeI2c { model, fail: true }, 0x19);
         assert!(imu.is_moving(250, 3, 100).is_err());
     }
 

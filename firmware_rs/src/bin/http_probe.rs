@@ -45,12 +45,17 @@ fn main() -> ! {
         &mut url,
         format_args!(
             "AT+HTTPPARA=\"URL\",\"http://{}/api/v2/{}/feeds/{}/data?X-AIO-Key={}\"",
-            cfg::SERVER_HOST, cfg::AIO_USER, cfg::AIO_FEED_LOCATION, cfg::AIO_KEY
+            cfg::SERVER_HOST,
+            cfg::AIO_USER,
+            cfg::AIO_FEED_LOCATION,
+            cfg::AIO_KEY
         ),
     );
 
     if !cmd(&mut uart, &delay, "AT+HTTPINIT", 3_000, &["OK"]) {
-        esp_println::println!("HTTPINIT failed on first try; terminating stale service and retrying");
+        esp_println::println!(
+            "HTTPINIT failed on first try; terminating stale service and retrying"
+        );
         cmd(&mut uart, &delay, "AT+HTTPTERM", 3_000, &["OK"]);
         cmd(&mut uart, &delay, "AT+CGACT=1,1", 15_000, &["OK"]);
         cmd(&mut uart, &delay, "AT+CGPADDR=1", 3_000, &["OK"]);
