@@ -4,7 +4,7 @@ Rust (`no_std`, esp-hal): motion-gated location tracker on ESP32-C3 SuperMini +
 SIM7600CE-T + LIS2DH.
 
 **Status: partially bench-verified on hardware.** All
-parsing/classification/validation logic is host-tested (40 tests, `cargo test`
+parsing/classification/validation logic is host-tested (44 tests, `cargo test`
 command below). Board smoke (2026-10-29, no peripherals): flash + boot ✔,
 esp-hal/esp-rtos init ✔, RTC-fast state surviving deep sleep ✔, exact
 `mono_ms` restoration on timer wake ✔, stable wake → classify → report → sleep
@@ -42,10 +42,27 @@ This firmware fixes them by construction instead of patching:
 in `gpsinfo.rs` (0 or omitted, never guessed) and the host test suite.
 
 Uplink: **GPS + internet both via the SIM7600**. The ESP32's own WiFi/BT radio
-is unused. Default channel is HTTP via the module's `AT+HTTP` stack to Adafruit
-IO (verified 2026-11-05). SMS is the fallback (needs `owner` in
-`adafruit.toml`). TLS is not enabled yet; the AIO key travels in the URL query
-string over plain HTTP (see Known limitations).
+is unused. The channel is a **hardware switch** on GPIO10, sampled on every
+wake (`read_mode()` in `bin/main.rs`):
+
+| Switch | Channel | Pros | Cons |
+|---|---|---|---|
+| open / not fitted (pin HIGH) | HTTP via `AT+HTTP` to Adafruit IO | effectively free per report, full JSON point (lat/lon/age/time), map renders itself | needs a data SIM with credit, LTE data coverage and a PDP context; dies where data is weak |
+| closed to GND (pin LOW) | SMS to `owner` | works on voice-grade coverage, no APN/data plan, arrives even with no mobile data | billed per message (so a slower cadence), 160-char text instead of a point, nothing renders it |
+
+Because SMS costs money per report, the cadence is channel-dependent:
+`SEND_MOVING_MS`/`SEND_IDLE_MS` (60 s / 15 min) for HTTP,
+`SEND_MOVING_SMS_MS`/`SEND_IDLE_SMS_MS` (5 min / 1 h) for SMS — both guesses
+until Telkomsel's per-SMS tariff is checked.
+
+Flipping the switch takes effect at the next wake and pulls the next report
+forward, so the new channel can be seen working. Set to SMS with no `owner`
+configured, the firmware logs `sms=disabled owner_not_configured fallback=http`
+and sends over HTTP rather than going silent. `MODE_SWITCH_FITTED = false` in
+`config.rs` ignores the pin and uses `REPORT_VIA_DEFAULT`.
+
+TLS is not enabled yet; the AIO key travels in the URL query string over plain
+HTTP (see Known limitations).
 
 ## Stack
 
@@ -71,6 +88,20 @@ cargo test --no-default-features --target x86_64-unknown-linux-gnu   # host test
 `.cargo/config.toml` makes the riscv target the default, and `cargo test`
 without `--target` would try to link `std` into `no_std`.
 
+Lints, for the same reason, are two commands — `cargo clippy --all-targets`
+alone tries to build the test harness for the bare-metal target and buries you
+in bogus "can't find crate for `std`" errors:
+
+```sh
+cargo clippy --bins                                                   # firmware
+cargo clippy --no-default-features --target x86_64-unknown-linux-gnu --all-targets
+cargo fmt --check
+```
+
+Both are warning-free, and `stack-size-threshold` in `.clippy.toml` is raised
+to 2048 (from esp-generate's 1024) because the report path legitimately holds
+the AT line buffer and, on the HTTP leg, the URL plus the JSON point.
+
 ### Flashing
 
 With Nix (recommended — toolchain and `espflash` pinned by
@@ -89,6 +120,7 @@ cd firmware_rs
 cargo build --bin modem_probe   # raw AT/UART link, no SIM/antenna needed
 cargo build --bin http_probe    # module-side AT+HTTP POST to Adafruit IO
 cargo build --bin net_probe     # same path through the async driver + uplink.rs
+cargo build --bin mode_probe    # uplink mode switch (GPIO10) level + channel
 espflash flash --chip esp32c3 target/riscv32imc-unknown-none-elf/debug/<bin>
 ```
 
@@ -124,6 +156,7 @@ Verified flash (2026-10-29): ESP32-C3 rev v0.4, 4MB, boot + first-cycle run OK.
 | 8 | I2C SDA (onboard LED removed first) |
 | 9 | I2C SCL |
 | 0 | LIS2DH INT1 (RTC wake pin; try GPIO3 if wake never fires) |
+| 10 | uplink mode switch to GND (open = HTTP, closed = SMS) |
 
 Modem I2C address: 0x19 (LIS2DH, SDO/SA0 high).
 
@@ -140,6 +173,10 @@ Modem I2C address: 0x19 (LIS2DH, SDO/SA0 high).
 - Cadences advance only on a successful send; failures retry after 60 s.
   Deep sleep always clamps to ≥ 2 s (the RTC deadline panics if too near) and
   ≤ 1 h; that upper clamp is the heartbeat backstop when the IMU is silent.
+- The mode switch is read with the internal pull-up, then dropped to
+  `Pull::None` before sleep: a closed switch across the ~45 kΩ pull-up draws
+  ~73 µA, more than the entire sleep budget. Three samples 2 ms apart debounce
+  it; a disagreeing read keeps the previous channel.
 - Satellite count is reported only when a fix actually carried it — 0 or
   omitted otherwise (issue #7).
 - Modem power-on is idempotent (probe before pulse); power-off prefers

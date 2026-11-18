@@ -16,9 +16,33 @@ this board.
 | GPIO6 | PWRKEY gate | optional; N-MOSFET gate, **not** PWRKEY direct |
 | GPIO8 | LIS2DH SDA | onboard LED — remove it (see below) |
 | GPIO9 | LIS2DH SCL | |
+| GPIO10 | uplink mode switch | SPST to GND: open = internet/HTTP, closed = SMS |
 | 3V3 | LIS2DH VCC | fine, draws µA |
 | 5V/VBUS | modem VBAT via boost | **not** 3V3 |
 | GND | everything | mandatory common ground |
+
+## Uplink mode switch
+
+One SPST (slide or toggle) switch between GPIO10 and GND picks the reporting
+channel, so the mode can be changed on the chair without reflashing:
+
+- **Open** (or no switch fitted) — internal pull-up holds the pin high — the
+  tracker reports over mobile **data** (`AT+HTTP` to Adafruit IO). Near-free
+  per report and carries a full point, but needs a data SIM with credit and
+  usable LTE data coverage.
+- **Closed to GND** — the tracker reports by **SMS** to `owner`. Works wherever
+  voice-grade coverage reaches and needs no APN or data plan, but each message
+  is billed and carries only a 160-char text, so the firmware uses a slower
+  cadence (5 min moving / 1 h parked instead of 60 s / 15 min).
+
+No external resistor is needed: the firmware samples with the internal pull-up
+and then releases it before sleep, because a closed switch across the ~45 kΩ
+pull-up would draw ~73 µA — more than the whole deep-sleep budget. If a board
+ever reads the pad as floating in sleep, fit an external 1 MΩ pull-up to 3V3
+(~3 µA) instead.
+
+The switch is read on every wake, so a flip takes effect at the next wake (at
+most one watchdog period, 1 h) and pulls the next report forward.
 
 PWRKEY idles high on a pull-up to VBAT and the module powers on when pulled low
 ~1.5 s. Drive it through a 2N7002/AO3400; the C3 must only touch the gate.
@@ -152,6 +176,10 @@ these via its own code paths (`lis2dh::probe`, `sim7600::position`).
    sky view; indoors this will not succeed and that is expected).
 5. **SMS round trip.** Verify a ping arrives before trusting any of the above
    on battery.
+5. **Mode switch.** Flash `mode_probe`: open reads `level=high via=http`,
+   closed reads `level=low via=sms`. Then confirm on `firmware_rs` that a
+   report actually goes out over each channel, and re-measure sleep current
+   with the switch **closed** — a pull-up left enabled shows up as ~73 µA.
 6. **AT+HTTP uplink**. Flash `http_probe`/`net_probe`: `+HTTPACTION: 1,200,...`
    and the point appears in the Adafruit feed. ✔ 2026-11-05 over the ESP32
    UART (SIM7600CE-T, Telkomsel). `PPP` (`ATD*99***1#`) was exercised but

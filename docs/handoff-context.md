@@ -60,7 +60,14 @@ owner = "YOUR_OWNER_NUMBER"   # SMS fallback
 apn = "internet"              # Telkomsel example; carrier PDP context
 ```
 
-- `REPORT_VIA = Http` (default). HTTP path: modem-side `AT+HTTP` POST to `http://{host}/api/v2/{user}/feeds/{location_feed}/data?X-AIO-Key=...` with JSON body `{"value":"...","lat":<deg>,"lon":<deg>,"created_at":<unix>}` (value is a status/lat,lon string in firmware; map uses `lat/lon` fields).
+- Channel is chosen at runtime by the GPIO10 mode switch (`read_mode()` in
+  `bin/main.rs`): open/not fitted = `ReportVia::Http`, closed to GND =
+  `ReportVia::Sms`; `MODE_SWITCH_FITTED = false` falls back to
+  `REPORT_VIA_DEFAULT` (Http). The selected channel is persisted in
+  `PersistState::via` and also sets the cadence (`ReportVia::moving_ms()` /
+  `idle_ms()`): 60 s / 15 min on HTTP, 5 min / 1 h on SMS. Bench with the
+  `mode_probe` binary.
+- HTTP path (switch open). HTTP path: modem-side `AT+HTTP` POST to `http://{host}/api/v2/{user}/feeds/{location_feed}/data?X-AIO-Key=...` with JSON body `{"value":"...","lat":<deg>,"lon":<deg>,"created_at":<unix>}` (value is a status/lat,lon string in firmware; map uses `lat/lon` fields).
 
 ## 4) Bench binaries (`firmware_rs/src/bin/`)
 

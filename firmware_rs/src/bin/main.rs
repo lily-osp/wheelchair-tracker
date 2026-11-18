@@ -5,6 +5,9 @@
 //! Issues #1-#6 of the tracker repo are fixed by construction here - see
 //! `lib.rs` for the mapping.
 //!
+//! Uplink channel is a hardware choice: the SPST switch on `cfg::MODE_SWITCH`
+//! picks SMS (closed) or internet/HTTP (open) and is sampled on every wake.
+//!
 //! Hardware status (2026-10-29): boot, RTC-state persistence, exact mono
 //! restoration and the sleep/wake loop are verified on a real C3 with no
 //! peripherals attached. The modem/I2C/INT1 paths remain bench-pending - see
@@ -33,9 +36,9 @@ use static_cell::StaticCell;
 
 use firmware_rs::config as cfg;
 use firmware_rs::config::ReportVia;
-use firmware_rs::uplink;
 use firmware_rs::motion::{self, MotionEvent, MotionParams, WakeMotion};
 use firmware_rs::state::PersistState;
+use firmware_rs::uplink;
 use firmware_rs::{lis2dh, sim7600};
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -47,6 +50,10 @@ static mut PERSIST: PersistState = PersistState::ZEROED;
 
 /// The modem's UART singleton, parked so `report` can borrow it every wake.
 static MODEM_UART: StaticCell<Uart<'static, esp_hal::Async>> = StaticCell::new();
+/// The AT driver, including its ~1.7 kB line buffer. Kept out of `report`'s
+/// stack frame; initialised at most once per boot, which is exactly how often
+/// `report` runs (deep sleep resets the CPU on every wake).
+static MODEM: StaticCell<sim7600::Sim7600<'static>> = StaticCell::new();
 
 const MODEM_SYNC_DELAY_MS: u32 = 500;
 /// The module needs seconds to boot; keep the probe loop honest.
@@ -59,9 +66,7 @@ const RETRY_AFTER_FAIL_MS: u64 = 60_000;
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
     // 80 MHz is sufficient for the short motion-only path and avoids paying
     // the 160 MHz active-current cost on every GPIO wake.
-    let peripherals = esp_hal::init(
-        esp_hal::Config::default().with_cpu_clock(CpuClock::default()),
-    );
+    let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::default()));
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
@@ -80,25 +85,41 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         InputConfig::default().with_pull(Pull::Down),
     );
 
+    // Uplink mode switch: pull-up, closed to GND = SMS. Sampled on every
+    // wake; the pull-up is dropped again before sleep (see `park_switch`).
+    let mut mode_switch = Input::new(
+        peripherals.GPIO10,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+
     let mut i2c = I2c::new(peripherals.I2C0, I2cConfig::default())
         .unwrap()
         .with_sda(peripherals.GPIO8)
         .with_scl(peripherals.GPIO9);
 
     let modem_uart = MODEM_UART.init(
-        Uart::new(peripherals.UART1, UartConfig::default().with_baudrate(115_200))
-            .unwrap()
-            .with_rx(peripherals.GPIO5)
-            .with_tx(peripherals.GPIO4)
-            .into_async(),
+        Uart::new(
+            peripherals.UART1,
+            UartConfig::default().with_baudrate(115_200),
+        )
+        .unwrap()
+        .with_rx(peripherals.GPIO5)
+        .with_tx(peripherals.GPIO4)
+        .into_async(),
     );
 
+    // Raw-pointer path on purpose: `&mut PERSIST` on a mutable static is
+    // `static_mut_refs`, and clippy's "just use PERSIST" suggestion is that
+    // exact pattern. There is one task and one borrow, taken here.
+    #[allow(clippy::deref_addrof, reason = "&raw mut avoids static_mut_refs")]
     let state: &'static mut PersistState = unsafe { &mut *(&raw mut PERSIST) };
     if !state.is_valid() {
         state.reset();
         state.next_report_ms = state.mono_ms + cfg::POLL_MS as u64;
         state.seal();
     }
+
+    let via = read_mode(&mut mode_switch, state).await;
 
     let params = MotionParams {
         enter_mg: cfg::MOVE_ENTER_MG,
@@ -118,7 +139,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     let cause = wakeup_cause();
     if cause.contains(WakeupSource::Gpio) {
         esp_println::println!("wake=GPIO");
-        on_motion_wake(state, &mut i2c, &mut imu_int, &params);
+        on_motion_wake(state, &mut i2c, &mut imu_int, &params, via);
     } else if cause.contains(WakeupSource::Timer) {
         esp_println::println!("wake=Timer mono={}ms", state.mono_ms);
         on_timer_wake(
@@ -126,6 +147,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             &mut i2c,
             &mut imu_int,
             &params,
+            via,
             &mut pwrkey_gate,
             modem_uart,
         )
@@ -136,7 +158,53 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     // Power-on reset (empty cause): the init above already set the first
     // report target.
 
+    park_switch(&mut mode_switch);
     arm_and_sleep(&mut lp, &mut imu_int, state, sleep_duration_ms(state)).await
+}
+
+/// Samples the mode switch and records the channel in the persisted state.
+///
+/// Three samples 2 ms apart: a switch bounces, and a half-made contact must
+/// not be read as a mode change. Disagreement keeps the channel from the
+/// previous wake. A flip is a deliberate user action, so it pulls the next
+/// report forward - the user gets to see the new channel work.
+async fn read_mode(switch: &mut Input<'_>, state: &mut PersistState) -> ReportVia {
+    let previous = ReportVia::from_u8(state.via);
+    if !cfg::MODE_SWITCH_FITTED {
+        return cfg::REPORT_VIA_DEFAULT;
+    }
+
+    let mut low = 0u8;
+    for i in 0..3 {
+        if i > 0 {
+            Timer::after_millis(2).await;
+        }
+        low += (switch.level() == Level::Low) as u8;
+    }
+    let via = match low {
+        0 => ReportVia::Http,
+        3 => ReportVia::Sms,
+        _ => {
+            esp_println::println!("mode=bounce keep={}", previous.name());
+            previous
+        }
+    };
+
+    if via != previous {
+        esp_println::println!("mode={} (was {})", via.name(), previous.name());
+        state.next_report_ms = state.mono_ms + MIN_SLEEP_MS;
+    } else {
+        esp_println::println!("mode={}", via.name());
+    }
+    state.via = via.as_u8();
+    state.seal();
+    via
+}
+
+/// Drops the switch pull-up before sleep. A closed switch across the ~45 k
+/// internal pull-up draws ~73 uA, which alone exceeds the sleep budget.
+fn park_switch(switch: &mut Input<'_>) {
+    switch.apply_config(&InputConfig::default().with_pull(Pull::None));
 }
 
 /// Motion-only wake: classify, bill one poll period, never touch the modem.
@@ -145,6 +213,7 @@ fn on_motion_wake(
     i2c: &mut I2c<'_, esp_hal::Blocking>,
     imu_int: &mut Input<'_>,
     params: &MotionParams,
+    via: ReportVia,
 ) {
     // Sleep length is unknown on this path; bill one poll period as the
     // lower bound, so cadence math stays conservative.
@@ -156,7 +225,7 @@ fn on_motion_wake(
         state.next_report_ms = if state.is_moving() {
             state.mono_ms + MIN_SLEEP_MS
         } else {
-            state.mono_ms + cfg::SEND_IDLE_MS as u64
+            state.mono_ms + via.idle_ms() as u64
         };
     }
     if event != MotionEvent::None {
@@ -172,6 +241,7 @@ async fn on_timer_wake(
     i2c: &mut I2c<'_, esp_hal::Blocking>,
     imu_int: &mut Input<'_>,
     params: &MotionParams,
+    via: ReportVia,
     gate: &mut Output<'_>,
     modem_uart: &'static mut Uart<'static, esp_hal::Async>,
 ) {
@@ -193,7 +263,7 @@ async fn on_timer_wake(
         due
     );
     if due {
-        report(state, gate, modem_uart, "tick").await;
+        report(state, gate, modem_uart, via, "tick").await;
     }
 }
 
@@ -236,13 +306,22 @@ async fn report(
     state: &mut PersistState,
     gate: &mut Output<'_>,
     modem_uart: &'static mut Uart<'static, esp_hal::Async>,
+    via: ReportVia,
     why: &str,
 ) {
     let awake_started = Instant::now();
-    let mut sim = sim7600::Sim7600::new(modem_uart, Duration::from_millis(1500), 2);
+    // `init_with`, not `init`: the driver is built in place, so its 1 kB
+    // line buffer never passes through this frame's stack.
+    let sim = MODEM.init_with(|| sim7600::Sim7600::new(modem_uart, Duration::from_millis(1500), 2));
 
-    let modem_on = ensure_modem_on(gate, &mut sim).await && sim.bring_up(Some(cfg::APN)).await;
-    esp_println::println!("report({}): modem_on={}", why, modem_on);
+    // SMS needs no PDP context, so the APN is only configured for HTTP -
+    // one command less, and nothing to attach on a voice-only SIM.
+    let apn = match via {
+        ReportVia::Http => Some(cfg::APN),
+        ReportVia::Sms => None,
+    };
+    let modem_on = ensure_modem_on(gate, sim).await && sim.bring_up(apn).await;
+    esp_println::println!("report({}): via={} modem_on={}", why, via.name(), modem_on);
     if !modem_on {
         advance_awake(state, awake_started);
         state.next_report_ms = state.mono_ms + RETRY_AFTER_FAIL_MS;
@@ -254,7 +333,7 @@ async fn report(
     let fix_ok = if fix_fresh(state) {
         true
     } else if state.is_moving() || !state.has_fix() {
-        acquire_fix(state, &mut sim).await
+        acquire_fix(state, sim).await
     } else {
         false
     };
@@ -263,28 +342,28 @@ async fn report(
         advance_awake(state, awake_started);
         state.next_report_ms = state.mono_ms + RETRY_AFTER_FAIL_MS;
         state.seal();
-        modem_off(&mut sim, gate).await;
+        modem_off(sim, gate).await;
         return;
     }
 
     advance_awake(state, awake_started);
-    let sent = send_report(state, &mut sim, why).await;
+    let sent = send_report(state, sim, via, why).await;
     esp_println::println!("report: sent={}", sent);
 
     // Cadence advances on a successful send; failures retry sooner.
     state.next_report_ms = state.mono_ms
         + if sent {
             (if state.is_moving() {
-                cfg::SEND_MOVING_MS
+                via.moving_ms()
             } else {
-                cfg::SEND_IDLE_MS
+                via.idle_ms()
             }) as u64
         } else {
             RETRY_AFTER_FAIL_MS
         };
     state.seal();
 
-    modem_off(&mut sim, gate).await;
+    modem_off(sim, gate).await;
 }
 
 /// GNSS acquisition: powered poll until a valid fix or the deadline.
@@ -295,11 +374,11 @@ async fn acquire_fix(state: &mut PersistState, sim: &mut sim7600::Sim7600<'_>) -
     let deadline = Instant::now() + Duration::from_millis(cfg::FIX_DEADLINE_MS as u64);
     let mut got = None;
     while Instant::now() < deadline {
-        if let Some(fix) = sim.position().await {
-            if fix.valid() {
-                got = Some(fix);
-                break;
-            }
+        if let Some(fix) = sim.position().await
+            && fix.valid()
+        {
+            got = Some(fix);
+            break;
         }
         Timer::after_millis(2000).await;
     }
@@ -319,14 +398,17 @@ async fn acquire_fix(state: &mut PersistState, sim: &mut sim7600::Sim7600<'_>) -
 }
 
 fn advance_awake(state: &mut PersistState, started: Instant) {
-    let elapsed = Instant::now().saturating_duration_since(started).as_millis();
+    let elapsed = Instant::now()
+        .saturating_duration_since(started)
+        .as_millis();
     state.mono_ms = state.mono_ms.saturating_add(elapsed);
 }
 
-/// Sends via the configured channel (SMS default, HTTP opt-in).
+/// Sends over the channel the mode switch selected.
 async fn send_report(
     state: &mut PersistState,
     sim: &mut sim7600::Sim7600<'_>,
+    via: ReportVia,
     why: &str,
 ) -> bool {
     let age_ms = state.fix_age_ms(state.mono_ms);
@@ -349,51 +431,64 @@ async fn send_report(
         ),
     );
 
-    match cfg::REPORT_VIA {
-        ReportVia::Sms if !cfg::OWNER.is_empty() => {
-            sim.sms_send(cfg::OWNER, body.as_str()).await.is_ok()
+    // The switch says SMS but no recipient is configured: fall back to HTTP
+    // rather than go silent, and say so on the console.
+    let via = if via == ReportVia::Sms && cfg::OWNER.is_empty() {
+        esp_println::println!("sms=disabled owner_not_configured fallback=http");
+        ReportVia::Http
+    } else {
+        via
+    };
+
+    match via {
+        ReportVia::Sms => sim.sms_send(cfg::OWNER, body.as_str()).await.is_ok(),
+        // Separate function on purpose: the URL and JSON buffers are ~600
+        // bytes and must not share a stack frame with the rest of the
+        // report path (`clippy::large_stack_frames` is denied here).
+        ReportVia::Http => send_http(state, sim, body.as_str()).await,
+    }
+}
+
+/// HTTP leg: builds the point and the keyed URL, then POSTs once.
+#[inline(never)]
+async fn send_http(state: &PersistState, sim: &mut sim7600::Sim7600<'_>, body: &str) -> bool {
+    // One atomic point keeps the location, fix age, motion state and GNSS
+    // timestamp together. The server must not infer freshness from its
+    // receive time.
+    let mut loc_body = String::<256>::new();
+    let _ = core::fmt::Write::write_fmt(
+        &mut loc_body,
+        format_args!(
+            "{{\"value\":\"{}\",\"lat\":{},\"lon\":{},\"created_at\":{}}}",
+            body,
+            deg_str(state.lat_e7),
+            deg_str(state.lon_e7),
+            state.unix_fix
+        ),
+    );
+
+    // The key goes in the query string because AT+HTTPPARA cannot set custom
+    // headers (see uplink.rs).
+    let mut url = String::<192>::new();
+    let _ = core::fmt::Write::write_fmt(
+        &mut url,
+        format_args!(
+            "http://{}/api/v2/{}/feeds/{}/data?X-AIO-Key={}",
+            cfg::SERVER_HOST,
+            cfg::AIO_USER,
+            cfg::AIO_FEED_LOCATION,
+            cfg::AIO_KEY
+        ),
+    );
+
+    match uplink::post_json(sim, url.as_str(), loc_body.as_bytes()).await {
+        Ok(status) => {
+            esp_println::println!("http={}", status);
+            true
         }
-        ReportVia::Sms => {
-            esp_println::println!("sms=disabled owner_not_configured");
+        Err(e) => {
+            esp_println::println!("http={:?}", e);
             false
-        }
-        ReportVia::Http => {
-            // One atomic point keeps the location, fix age, motion state and
-            // GNSS timestamp together. The server must not infer freshness
-            // from its receive time.
-            let mut loc_body = String::<256>::new();
-            let _ = core::fmt::Write::write_fmt(
-                &mut loc_body,
-                format_args!(
-                    "{{\"value\":\"{}\",\"lat\":{},\"lon\":{},\"created_at\":{}}}",
-                    body.as_str(), deg_str(state.lat_e7), deg_str(state.lon_e7), state.unix_fix
-                ),
-            );
-
-            // The key goes in the query string because AT+HTTPPARA cannot set
-            // custom headers (see uplink.rs).
-            let mut url = String::<320>::new();
-            let _ = core::fmt::Write::write_fmt(
-                &mut url,
-                format_args!(
-                    "http://{}/api/v2/{}/feeds/{}/data?X-AIO-Key={}",
-                    cfg::SERVER_HOST,
-                    cfg::AIO_USER,
-                    cfg::AIO_FEED_LOCATION,
-                    cfg::AIO_KEY
-                ),
-            );
-
-            match uplink::post_json(sim, url.as_str(), loc_body.as_bytes()).await {
-                Ok(status) => {
-                    esp_println::println!("http={}", status);
-                    true
-                }
-                Err(e) => {
-                    esp_println::println!("http={:?}", e);
-                    false
-                }
-            }
         }
     }
 }

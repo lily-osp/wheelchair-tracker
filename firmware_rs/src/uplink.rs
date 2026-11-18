@@ -64,7 +64,7 @@ pub async fn post_json(sim: &mut Sim7600<'_>, url: &str, body: &[u8]) -> Result<
 async fn post_inner(sim: &mut Sim7600<'_>, url: &str, body: &[u8]) -> Result<u16, UplinkError> {
     let _ = sim.ok("AT+HTTPPARA=\"CID\",1").await;
 
-    let mut cmd = String::<384>::new();
+    let mut cmd = String::<224>::new();
     let _ = write!(cmd, "AT+HTTPPARA=\"URL\",\"{}\"", url);
     if !sim.ok(cmd.as_str()).await {
         return Err(UplinkError::Init);
@@ -78,7 +78,11 @@ async fn post_inner(sim: &mut Sim7600<'_>, url: &str, body: &[u8]) -> Result<u16
     let _ = write!(data, "AT+HTTPDATA={},20000", body.len());
     let _ = sim.uart_mut().write(data.as_bytes());
     let _ = sim.uart_mut().write(b"\r\n");
-    if sim.wait_line("DOWNLOAD", Duration::from_secs(5)).await.is_none() {
+    if sim
+        .wait_line("DOWNLOAD", Duration::from_secs(5))
+        .await
+        .is_none()
+    {
         return Err(UplinkError::Data);
     }
 
@@ -103,9 +107,12 @@ async fn post_inner(sim: &mut Sim7600<'_>, url: &str, body: &[u8]) -> Result<u16
 }
 
 /// Local guard: no quotes, CR/LF or spaces, `http://` only, sane length.
+/// The 192-byte cap is what `post_inner`'s command buffer can hold around a
+/// URL (`AT+HTTPPARA="URL","..."` adds 22 bytes); a longer URL is rejected
+/// here rather than silently truncated into the modem.
 fn valid_url(url: &str) -> bool {
     !url.is_empty()
-        && url.len() <= 300
+        && url.len() <= 192
         && url.starts_with("http://")
         && !url
             .bytes()

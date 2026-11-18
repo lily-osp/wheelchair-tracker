@@ -3,9 +3,11 @@
 Motion-gated location tracker: ESP32-C3 Super Mini + SIM7600CE-T + LIS2DH.
 
 **Rust, `no_std`, esp-hal** — see `firmware_rs/`. The SIM7600 provides **both**
-GNSS and internet: the default uplink is HTTP through the module's own `AT+HTTP`
-stack (verified against Adafruit IO), with SMS as a fallback. The ESP32's own
-WiFi/BT radio is unused.
+GNSS and internet, and a **switch on GPIO10 picks the channel**: open = HTTP
+through the module's own `AT+HTTP` stack (verified against Adafruit IO, cheap
+per report, needs data coverage), closed to GND = SMS (works on voice-grade
+coverage with no data plan, but billed per message, so a slower cadence). The
+ESP32's own WiFi/BT radio is unused.
 
 **See `firmware_rs/README.md` for the full documentation** — build, flashing,
 pin map, power budget, runtime model, and the bench checklist.

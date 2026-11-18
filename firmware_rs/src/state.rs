@@ -57,7 +57,12 @@ pub struct PersistState {
     /// every wake and function-local statics are lost (this is issue #2).
     pub moving_streak: u8,
     pub idle_streak: u8,
-    _pad3: [u8; 6],
+    /// Uplink channel in force on the last wake (`ReportVia as u8`, 0 =
+    /// HTTP). Carried across sleeps so a flipped mode switch is visible in
+    /// the log and so a mid-sleep flip does not make a cadence already
+    /// billed against the old channel look due.
+    pub via: u8,
+    _pad3: [u8; 5],
 }
 
 impl PersistState {
@@ -78,7 +83,8 @@ impl PersistState {
         sleep_target_ms: 0,
         moving_streak: 0,
         idle_streak: 0,
-        _pad3: [0; 6],
+        via: 0,
+        _pad3: [0; 5],
     };
 
     /// Returns true when the magic and checksum are valid.

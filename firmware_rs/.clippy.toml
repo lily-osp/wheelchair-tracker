@@ -1,1 +1,6 @@
-stack-size-threshold = 1024
+# 1024 is the esp-generate template default. The report path legitimately
+# holds the AT driver's line buffer (RX_CAP = 1 kB) and, on the HTTP leg, the
+# URL plus the JSON point; both are built once per wake on the main task's
+# stack, which is far larger. Raised rather than silenced, so a genuinely
+# runaway frame still shows up.
+stack-size-threshold = 2048

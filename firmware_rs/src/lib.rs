@@ -15,8 +15,11 @@
 //! - #6: GNSS via `AT+CGNSSINFO`/`AT+CGPSINFO` on the single AT port; no
 //!   second UART, no NMEA parser.
 //!
-//! Uplink: HTTP via the modem's `AT+HTTP` stack by default (verified against
-//! Adafruit IO, 2026-11-05). SMS is the fallback. PPP (`ATD*99***1#`) was
+//! Uplink: the channel is a hardware switch on `config::MODE_SWITCH`, sampled
+//! on every wake - open/not fitted selects HTTP via the modem's `AT+HTTP`
+//! stack (verified against Adafruit IO, 2026-11-05), closed to GND selects
+//! SMS, which needs no data plan but is billed per message and therefore runs
+//! a slower cadence (`ReportVia::moving_ms`/`idle_ms`). PPP (`ATD*99***1#`) was
 //! evaluated and is not used (carrier reset the first request). The ESP32's
 //! own radio is unused.
 
